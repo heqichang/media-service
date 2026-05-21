@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>视频播放器 - Media Service</title>
+    <link href="https://unpkg.com/video.js@7.21.1/dist/video-js.css" rel="stylesheet">
+    <link href="https://unpkg.com/videojs-contrib-ads@6.6.5/dist/videojs.ads.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #0f0f0f;
+            color: #fff;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #333;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .back-btn {
+            padding: 8px 16px;
+            background: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+
+        .back-btn:hover {
+            background: #1d4ed8;
+        }
+
+        .video-wrapper {
+            position: relative;
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+        }
+
+        .video-js {
+            width: 100% !important;
+            height: auto !important;
+            aspect-ratio: 16 / 9;
+        }
+
+        .video-info {
+            margin-top: 20px;
+            background: #1a1a1a;
+            border-radius: 12px;
+            padding: 24px;
+        }
+
+        .video-title {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+
+        .video-meta {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            color: #888;
+            font-size: 14px;
+            margin-bottom: 16px;
+        }
+
+        .video-description {
+            color: #aaa;
+            line-height: 1.6;
+            margin-bottom: 16px;
+        }
+
+        .video-tags {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .tag {
+            padding: 4px 12px;
+            background: #2a2a2a;
+            border-radius: 20px;
+            font-size: 13px;
+            color: #888;
+        }
+
+        .quality-selector {
+            display: flex;
+            gap: 8px;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid #333;
+        }
+
+        .quality-btn {
+            padding: 6px 14px;
+            background: #2a2a2a;
+            color: #fff;
+            border: 1px solid #333;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+
+        .quality-btn:hover {
+            background: #3a3a3a;
+        }
+
+        .quality-btn.active {
+            background: #2563eb;
+            border-color: #2563eb;
+        }
+
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 400px;
+            color: #666;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #333;
+            border-top-color: #2563eb;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: #7f1d1d;
+            color: #fca5a5;
+            padding: 16px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+
+        .stats {
+            margin-top: 16px;
+            padding: 16px;
+            background: #1a1a1a;
+            border-radius: 8px;
+            font-size: 13px;
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            color: #888;
+        }
+
+        .stat-row span:last-child {
+            color: #fff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>视频播放器</h1>
+            <button class="back-btn" onclick="window.history.back()">返回</button>
+        </div>
+
+        <div id="videoContainer">
+            <div class="loading">
+                <div class="spinner"></div>
+            </div>
+        </div>
+
+        <div id="videoInfo" style="display: none;"></div>
+        <div id="error" class="error" style="display: none;"></div>
+    </div>
+
+    <script src="https://unpkg.com/video.js@7.21.1/dist/video.min.js"></script>
+    <script src="https://unpkg.com/hls.js@1.4.12/dist/hls.min.js"></script>
+    <script src="https://unpkg.com/dashjs@4.7.4/dist/dash.all.min.js"></script>
+
+    <script>
+        const API_BASE = '/api/v1';
+        let player = null;
+        let hls = null;
+
+        function getVideoId() {
+            const pathParts = window.location.pathname.split('/');
+            return pathParts[pathParts.length - 1] || new URLSearchParams(window.location.search).get('id');
+        }
+
+        async function loadVideo() {
+            const videoId = getVideoId();
+            if (!videoId) {
+                showError('请提供视频 ID');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/videos/${videoId}`);
+                if (!response.ok) {
+                    throw new Error('加载视频信息失败');
+                }
+
+                const result = await response.json();
+                if (!result.success) {
+                    throw new Error(result.error || '加载视频信息失败');
+                }
+
+                const video = result.data;
+                renderVideoInfo(video);
+                initializePlayer(video);
+            } catch (error) {
+                showError(error.message);
+            }
+        }
+
+        function renderVideoInfo(video) {
+            const infoDiv = document.getElementById('videoInfo');
+            infoDiv.style.display = 'block';
+
+            const duration = video.duration ? formatDuration(video.duration) : '--:--';
+            const resolution = video.width && video.height ? `${video.width}x${video.height}` : '未知';
+            const bitrate = video.bitrate ? `${(video.bitrate / 1000000).toFixed(2)} Mbps` : '未知';
+
+            infoDiv.innerHTML = `
+                <div class="video-title">${video.title}</div>
+                <div class="video-meta">
+                    <span>📊 ${duration}</span>
+                    <span>📺 ${resolution}</span>
+                    <span>📡 ${bitrate}</span>
+                    <span>👁 ${video.views || 0} 次观看</span>
+                    <span>📅 ${new Date(video.createdAt).toLocaleDateString('zh-CN')}</span>
+                </div>
+                ${video.description ? `<div class="video-description">${video.description}</div>` : ''}
+                ${video.tags && video.tags.length > 0 ? `
+                    <div class="video-tags">
+                        ${video.tags.map(t => `<span class="tag">#${t.tag.name}</span>`).join('')}
+                    </div>
+                ` : ''}
+                <div id="qualitySelector" class="quality-selector"></div>
+                <div class="stats">
+                    <div class="stat-row"><span>状态</span><span>${video.status}</span></div>
+                    <div class="stat-row"><span>文件大小</span><span>${formatFileSize(video.fileSize)}</span></div>
+                    <div class="stat-row"><span>格式</span><span>${video.format || '未知'}</span></div>
+                    <div class="stat-row"><span>分类</span><span>${video.category?.name || '未分类'}</span></div>
+                </div>
+            `;
+        }
+
+        async function initializePlayer(video) {
+            const container = document.getElementById('videoContainer');
+            const playlists = video.playlists || [];
+            const transcodeTasks = video.transcodeTasks || [];
+
+            let sourceUrl = '';
+            let sourceType = 'video/mp4';
+
+            const hlsPlaylist = playlists.find(p => p.type === 'hls');
+            const dashPlaylist = playlists.find(p => p.type === 'dash');
+            const mp4Task = transcodeTasks.find(t => t.status === 'COMPLETED' && t.outputPath?.endsWith('.mp4'));
+
+            if (hlsPlaylist) {
+                const urlResponse = await fetch(`${API_BASE}/storage/url/video/${encodeURIComponent(hlsPlaylist.url)}`);
+                const urlResult = await urlResponse.json();
+                sourceUrl = urlResult.data?.url || '';
+                sourceType = 'application/x-mpegURL';
+            } else if (dashPlaylist) {
+                const urlResponse = await fetch(`${API_BASE}/storage/url/video/${encodeURIComponent(dashPlaylist.url)}`);
+                const urlResult = await urlResponse.json();
+                sourceUrl = urlResult.data?.url || '';
+                sourceType = 'application/dash+xml';
+            } else if (mp4Task) {
+                const urlResponse = await fetch(`${API_BASE}/storage/url/video/${encodeURIComponent(mp4Task.outputPath)}`);
+                const urlResult = await urlResponse.json();
+                sourceUrl = urlResult.data?.url || '';
+                sourceType = 'video/mp4';
+            } else {
+                showError('视频尚未转码完成，请稍后再试');
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="video-wrapper">
+                    <video
+                        id="videoPlayer"
+                        class="video-js vjs-big-play-centered"
+                        controls
+                        preload="auto"
+                        poster="${video.thumbnailUrl ? await getThumbnailUrl(video.thumbnailUrl) : ''}"
+                        data-setup='{}'
+                    >
+                        <source src="${sourceUrl}" type="${sourceType}">
+                        <p class="vjs-no-js">
+                            您的浏览器不支持 HTML5 视频播放
+                            <a href="https://videojs.com/html5-video-support/" target="_blank">了解更多</a>
+                        </p>
+                    </video>
+                </div>
+            `;
+
+            player = videojs('videoPlayer', {
+                fluid: true,
+                aspectRatio: '16:9',
+                playbackRates: [0.5, 0.75, 1, 1.25, 1.5, 2],
+                controlBar: {
+                    pictureInPictureToggle: true,
+                    volumePanel: {
+                        inline: false,
+                    },
+                },
+            });
+
+            if (sourceType === 'application/x-mpegURL' && Hls.isSupported()) {
+                hls = new Hls({
+                    enableWorker: true,
+                    lowLatencyMode: true,
+                });
+
+                hls.loadSource(sourceUrl);
+                hls.attachMedia(player.el().querySelector('video'));
+
+                hls.on(Hls.Events.MANIFEST_PARSED, function(event, data) {
+                    renderQualitySelector(data.levels);
+                });
+
+                hls.on(Hls.Events.LEVEL_SWITCHED, function(event, data) {
+                    updateActiveQuality(data.level);
+                });
+
+                hls.on(Hls.Events.ERROR, function(event, data) {
+                    if (data.fatal) {
+                        showError('视频播放出错: ' + data.details);
+                    }
+                });
+            } else if (sourceType === 'application/dash+xml') {
+                const dashPlayer = dashjs.MediaPlayer().create();
+                const videoElement = player.el().querySelector('video');
+                dashPlayer.initialize(videoElement, sourceUrl, false);
+            }
+
+            if (video.thumbnails && video.thumbnails.length > 0) {
+                const sprite = video.thumbnails.find(t => t.isSprite);
+                if (sprite && sprite.spriteData) {
+                    setupThumbnailPreview(sprite);
+                }
+            }
+        }
+
+        function renderQualitySelector(levels) {
+            const selector = document.getElementById('qualitySelector');
+            if (!selector || !levels || levels.length === 0) return;
+
+            let html = '<span style="color: #888; margin-right: 8px; align-self: center;">清晰度:</span>';
+            html += '<button class="quality-btn active" data-level="-1">自动</button>';
+
+            levels.forEach((level, index) => {
+                const height = level.height || '?';
+                const bitrate = Math.round(level.bitrate / 1000) + 'kbps';
+                html += `<button class="quality-btn" data-level="${index}">${height}p (${bitrate})</button>`;
+            });
+
+            selector.innerHTML = html;
+
+            selector.querySelectorAll('.quality-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const level = parseInt(this.dataset.level);
+                    if (hls) {
+                        hls.currentLevel = level;
+                    }
+                    selector.querySelectorAll('.quality-btn').forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                });
+            });
+        }
+
+        function updateActiveQuality(level) {
+            const selector = document.getElementById('qualitySelector');
+            if (!selector) return;
+
+            selector.querySelectorAll('.quality-btn').forEach(b => b.classList.remove('active'));
+            const activeBtn = selector.querySelector(`[data-level="${level}"]`);
+            if (activeBtn) {
+                activeBtn.classList.add('active');
+            } else {
+                selector.querySelector('[data-level="-1"]')?.classList.add('active');
+            }
+        }
+
+        async function getThumbnailUrl(objectName) {
+            try {
+                const response = await fetch(`${API_BASE}/storage/url/thumbnail/${encodeURIComponent(objectName)}`);
+                const result = await response.json();
+                return result.data?.url || '';
+            } catch {
+                return '';
+            }
+        }
+
+        function setupThumbnailPreview(sprite) {
+            const spriteData = sprite.spriteData;
+            console.log('Sprite data:', spriteData);
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            document.querySelector('.loading')?.remove();
+        }
+
+        function formatDuration(seconds) {
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            if (h > 0) {
+                return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+            }
+            return `${m}:${s.toString().padStart(2, '0')}`;
+        }
+
+        function formatFileSize(bytes) {
+            if (!bytes) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        window.addEventListener('load', loadVideo);
+        window.addEventListener('beforeunload', () => {
+            if (player) {
+                player.dispose();
+            }
+            if (hls) {
+                hls.destroy();
+            }
+        });
+    </script>
+</body>
+</html>
