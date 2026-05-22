@@ -70,3 +70,111 @@ export interface PaginationResult<T> {
   pageSize: number;
   totalPages: number;
 }
+
+export interface LiveStreamAuthResult {
+  allowed: boolean;
+  liveRoomId?: string;
+  streamKey?: string;
+  reason?: string;
+}
+
+export interface LiveTranscodeConfig {
+  name: string;
+  width: number;
+  height: number;
+  videoBitrate: number;
+  audioBitrate?: number;
+  videoCodec?: 'h264' | 'h265' | 'av1';
+  audioCodec?: 'aac' | 'mp3' | 'opus';
+  framerate?: number;
+  isBackup?: boolean;
+}
+
+export interface LiveRecordConfig {
+  format: 'flv' | 'hls' | 'mp4';
+  sliceDuration?: number;
+  autoConvertVod?: boolean;
+}
+
+export interface DanmakuMessage {
+  id: string;
+  liveRoomId: string;
+  userId: string;
+  userName: string;
+  content: string;
+  color: string;
+  fontSize: number;
+  mode: number;
+  timestamp: Date;
+}
+
+export interface GiftMessage {
+  id: string;
+  liveRoomId: string;
+  giftId: string;
+  giftName: string;
+  userId: string;
+  userName: string;
+  quantity: number;
+  totalValue: number;
+  iconUrl?: string;
+  timestamp: Date;
+}
+
+export interface LikeMessage {
+  liveRoomId: string;
+  userId: string;
+  count: number;
+  timestamp: Date;
+}
+
+export interface OnlineUsersMessage {
+  liveRoomId: string;
+  count: number;
+  users: Array<{ userId: string; userName: string }>;
+}
+
+export interface LiveViewerInfo {
+  liveRoomId: string;
+  userId: string;
+  userName: string;
+  protocol: 'hls' | 'flv' | 'webrtc';
+}
+
+export interface WebRtcSignalMessage {
+  type: 'offer' | 'answer' | 'ice-candidate' | 'join' | 'leave';
+  liveRoomId: string;
+  userId: string;
+  targetUserId?: string;
+  data: any;
+}
+
+export interface LiveStreamMetrics {
+  liveRoomId: string;
+  bitrate: number;
+  width: number;
+  height: number;
+  codec: string;
+  fps: number;
+  latencyMs: number;
+  connectedAt?: Date;
+}
+
+export interface LiveRoomStats {
+  liveRoomId: string;
+  viewCount: number;
+  peakViewers: number;
+  likeCount: number;
+  danmakuCount: number;
+  giftCount: number;
+  duration: number;
+  startTime?: Date;
+  endTime?: Date;
+}
+
+export interface PlayAuthResult {
+  allowed: boolean;
+  token?: string;
+  expiresAt?: Date;
+  reason?: string;
+}

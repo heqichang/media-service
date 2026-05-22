@@ -46,6 +46,70 @@ enum ThumbnailFormat {
   WEBP
 }
 
+enum LiveRoomStatus {
+  NOT_STARTED
+  LIVING
+  ENDED
+  BANNED
+}
+
+enum LiveStreamStatus {
+  PUSHING
+  INTERRUPTED
+  STOPPED
+  FAILED
+}
+
+enum LiveStreamProtocol {
+  RTMP
+  SRT
+  RTSP
+}
+
+enum LiveTranscodeStatus {
+  RUNNING
+  STOPPED
+  FAILED
+  SWITCHED
+}
+
+enum LiveRecordingStatus {
+  RECORDING
+  STOPPED
+  CONVERTING
+  COMPLETED
+  FAILED
+}
+
+enum LiveRecordingFormat {
+  FLV
+  HLS
+  MP4
+}
+
+enum DanmakuStatus {
+  NORMAL
+  HIDDEN
+  BANNED
+}
+
+enum GiftStatus {
+  ENABLED
+  DISABLED
+}
+
+enum LivePlayProtocol {
+  HLS
+  FLV
+  WEBRTC
+}
+
+enum PlayAuthStatus {
+  ALLOWED
+  DENIED
+  EXPIRED
+}
+
 model Video {
   id             String          @id @default(uuid())
   title          String
@@ -68,6 +132,7 @@ model Video {
   transcodeTasks TranscodeTask[]
   thumbnails     Thumbnail[]
   playlists      Playlist[]
+  liveRecordings LiveRecording[]
   metadata       Json?
   views          Int             @default(0)
   isPublic       Boolean         @default(true)
@@ -81,12 +146,13 @@ model Video {
 }
 
 model Category {
-  id          String   @id @default(uuid())
-  name        String   @unique
+  id          String     @id @default(uuid())
+  name        String     @unique
   description String?
   videos      Video[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  liveRooms   LiveRoom[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 }
 
 model Tag {
@@ -123,6 +189,7 @@ model TranscodeTemplate {
   isHls          Boolean         @default(false)
   isDash         Boolean         @default(false)
   transcodeTasks TranscodeTask[]
+  liveTranscodes LiveTranscode[]
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
@@ -196,4 +263,215 @@ model UploadSession {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   expiresAt DateTime
+}
+
+model LiveRoom {
+  id          String          @id @default(uuid())
+  title       String
+  description String?
+  coverUrl    String?
+  categoryId  String?
+  category    Category?       @relation(fields: [categoryId], references: [id])
+  streamKey   String          @unique
+  status      LiveRoomStatus  @default(NOT_STARTED)
+  pushUrl     String?
+  playUrlHls  String?
+  playUrlFlv  String?
+  playUrlRtc  String?
+  isPublic    Boolean         @default(true)
+  maxBitrate  Int?
+  isRecorded  Boolean         @default(true)
+  recordFormat LiveRecordingFormat @default(FLV)
+  startTime   DateTime?
+  endTime     DateTime?
+  duration    Int             @default(0)
+  viewCount   Int             @default(0)
+  peakViewers Int             @default(0)
+  likeCount   Int             @default(0)
+  banReason   String?
+  streams     LiveStream[]
+  transcodes  LiveTranscode[]
+  recordings  LiveRecording[]
+  plans       LivePlan[]
+  danmakus    Danmaku[]
+  likes       LiveLike[]
+  gifts       LiveGiftLog[]
+  viewers     LiveViewer[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([status])
+  @@index([categoryId])
+  @@index([createdAt])
+}
+
+model LiveStream {
+  id           String            @id @default(uuid())
+  liveRoomId   String
+  liveRoom     LiveRoom          @relation(fields: [liveRoomId], references: [id], onDelete: Cascade)
+  streamIndex  Int               @default(0)
+  streamName   String
+  protocol     LiveStreamProtocol @default(RTMP)
+  status       LiveStreamStatus  @default(PUSHING)
+  bitrate      Int?
+  width        Int?
+  height       Int?
+  codec        String?
+  connectedAt  DateTime?
+  disconnectedAt DateTime?
+  duration     Int               @default(0)
+  isPrimary    Boolean           @default(true)
+  pushIp       String?
+  metadata     Json?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([liveRoomId])
+  @@index([status])
+}
+
+model LiveTranscode {
+  id            String             @id @default(uuid())
+  liveRoomId    String
+  liveRoom      LiveRoom           @relation(fields: [liveRoomId], references: [id], onDelete: Cascade)
+  templateId    String?
+  template      TranscodeTemplate? @relation(fields: [templateId], references: [id])
+  name          String
+  width         Int
+  height        Int
+  videoBitrate  Int
+  audioBitrate  Int?
+  videoCodec    VideoCodec         @default(H264)
+  audioCodec    AudioCodec         @default(AAC)
+  framerate     Int?
+  status        LiveTranscodeStatus @default(RUNNING)
+  outputUrl     String?
+  outputPath    String?
+  isBackup      Boolean            @default(false)
+  mainTranscodeId String?
+  mainTranscode LiveTranscode?     @relation("BackupTranscode", fields: [mainTranscodeId], references: [id])
+  backupTranscodes LiveTranscode[] @relation("BackupTranscode")
+  latencyMs     Int               @default(0)
+  lastCheckAt   DateTime?
+  errorMessage  String?
+  startedAt     DateTime?
+  stoppedAt     DateTime?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@index([liveRoomId])
+  @@index([status])
+}
+
+model LiveRecording {
+  id          String              @id @default(uuid())
+  liveRoomId  String
+  liveRoom    LiveRoom            @relation(fields: [liveRoomId], references: [id], onDelete: Cascade)
+  format      LiveRecordingFormat @default(FLV)
+  status      LiveRecordingStatus @default(RECORDING)
+  filePath    String?
+  fileSize    BigInt?
+  duration    Int                 @default(0)
+  segmentIndex Int                @default(0)
+  sliceDuration Int?
+  videoId     String?
+  video       Video?              @relation(fields: [videoId], references: [id], onDelete: SetNull)
+  startedAt   DateTime
+  stoppedAt   DateTime?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  @@index([liveRoomId])
+  @@index([status])
+}
+
+model LivePlan {
+  id          String   @id @default(uuid())
+  liveRoomId  String
+  liveRoom    LiveRoom @relation(fields: [liveRoomId], references: [id], onDelete: Cascade)
+  title       String
+  scheduledAt DateTime
+  duration    Int
+  description String?
+  isNotified  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([liveRoomId])
+  @@index([scheduledAt])
+}
+
+model Danmaku {
+  id         String        @id @default(uuid())
+  liveRoomId String
+  liveRoom   LiveRoom      @relation(fields: [liveRoomId], references: [id], onDelete: Cascade)
+  userId     String
+  userName   String
+  content    String
+  color      String        @default("#FFFFFF")
+  fontSize   Int           @default(24)
+  mode       Int           @default(1)
+  status     DanmakuStatus @default(NORMAL)
+  createdAt  DateTime      @default(now())
+
+  @@index([liveRoomId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Gift {
+  id        String       @id @default(uuid())
+  name      String
+  iconUrl   String
+  price     Decimal      @db.Decimal(10, 2)
+  value     Int
+  status    GiftStatus   @default(ENABLED)
+  sortOrder Int          @default(0)
+  giftLogs  LiveGiftLog[]
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+}
+
+model LiveGiftLog {
+  id         String   @id @default(uuid())
+  liveRoomId String
+  liveRoom   LiveRoom @relation(fields: [liveRoomId], references: [id], onDelete: Cascade)
+  giftId     String
+  gift       Gift     @relation(fields: [giftId], references: [id])
+  userId     String
+  userName   String
+  quantity   Int
+  totalValue Int
+  createdAt  DateTime @default(now())
+
+  @@index([liveRoomId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model LiveLike {
+  id         String   @id @default(uuid())
+  liveRoomId String
+  liveRoom   LiveRoom @relation(fields: [liveRoomId], references: [id], onDelete: Cascade)
+  userId     String
+  createdAt  DateTime @default(now())
+
+  @@index([liveRoomId])
+  @@index([userId])
+}
+
+model LiveViewer {
+  id          String   @id @default(uuid())
+  liveRoomId  String
+  liveRoom    LiveRoom @relation(fields: [liveRoomId], references: [id], onDelete: Cascade)
+  userId      String
+  userName    String
+  protocol    LivePlayProtocol @default(HLS)
+  connectedAt DateTime @default(now())
+  disconnectedAt DateTime?
+  isActive    Boolean  @default(true)
+
+  @@index([liveRoomId])
+  @@index([userId])
+  @@index([isActive])
 }

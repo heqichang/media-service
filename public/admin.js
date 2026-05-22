@@ -10,9 +10,11 @@
     const STATE = {
         currentTab: 'dashboard',
         videos: { page: 1, pageSize: 10, total: 0, items: [], filters: { search: '', categoryId: '', status: '' } },
+        liveRooms: { page: 1, pageSize: 10, total: 0, items: [], filters: { search: '', categoryId: '', status: '' } },
         categories: [],
         templates: [],
         tags: [],
+        gifts: [],
     };
 
     const api = {
@@ -168,6 +170,7 @@
         const titles = {
             dashboard: '概览', videos: '视频管理', upload: '上传视频',
             templates: '转码模板', categories: '分类管理', tags: '标签管理', storage: '存储管理',
+            'live-rooms': '直播间管理', 'live-gifts': '礼物管理',
         };
         $('#breadcrumb').textContent = titles[tab] || '';
         if (tab === 'dashboard') loadDashboard();
@@ -176,6 +179,8 @@
         if (tab === 'categories') loadCategories();
         if (tab === 'tags') loadTags();
         if (tab === 'storage') loadStorage();
+        if (tab === 'live-rooms') loadLiveRooms();
+        if (tab === 'live-gifts') loadGifts();
     }
 
     async function loadDashboard() {
@@ -327,6 +332,8 @@
             const opts = STATE.categories.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
             $('#videoCategoryFilter').innerHTML = '<option value="">全部分类</option>' + opts;
             $('#uploadCategory').innerHTML = '<option value="">未分类</option>' + opts;
+            const liveCatFilter = $('#liveRoomCategoryFilter');
+            if (liveCatFilter) liveCatFilter.innerHTML = '<option value="">全部分类</option>' + opts;
         } catch {}
     }
 
@@ -978,6 +985,514 @@
         } catch {}
     }
 
+    function liveRoomStatusBadge(status) {
+        const map = {
+            NOT_STARTED: ['未开始', 'badge-muted'],
+            LIVING: ['直播中', 'badge-success'],
+            ENDED: ['已结束', 'badge-info'],
+            BANNED: ['已封禁', 'badge-danger'],
+        };
+        const [label, cls] = map[status] || [status || '-', 'badge-muted'];
+        return `<span class="badge ${cls}">${label}</span>`;
+    }
+
+    function liveStreamStatusBadge(status) {
+        const map = {
+            PUSHING: ['推流中', 'badge-success'],
+            INTERRUPTED: ['中断', 'badge-warning'],
+            STOPPED: ['已停止', 'badge-muted'],
+            FAILED: ['失败', 'badge-danger'],
+        };
+        const [label, cls] = map[status] || [status || '-', 'badge-muted'];
+        return `<span class="badge ${cls}">${label}</span>`;
+    }
+
+    async function loadLiveRooms() {
+        const { page, pageSize, filters } = STATE.liveRooms;
+        const params = new URLSearchParams({ page, pageSize });
+        if (filters.search) params.set('search', filters.search);
+        if (filters.categoryId) params.set('categoryId', filters.categoryId);
+        if (filters.status) params.set('status', filters.status);
+
+        try {
+            const res = await api.get('/live-rooms?' + params.toString());
+            const data = res.data || {};
+            STATE.liveRooms.items = data.items || [];
+            STATE.liveRooms.total = data.total || 0;
+            renderLiveRoomsTable();
+            renderLiveRoomsPagination();
+        } catch (e) {
+            $('#liveRoomsTable tbody').innerHTML = `<tr><td colspan="10" class="empty">加载失败: ${escapeHtml(e.message)}</td></tr>`;
+        }
+    }
+
+    function renderLiveRoomsTable() {
+        const rows = STATE.liveRooms.items.map(r => `
+            <tr data-id="${r.id}">
+                <td><strong>${escapeHtml(r.title)}</strong><br><span style="color:var(--text-dim);font-size:11px;">${escapeHtml(r.description || '')}</span></td>
+                <td>${liveRoomStatusBadge(r.status)}</td>
+                <td>${escapeHtml(r.category?.name || '-')}</td>
+                <td>${r.isRecorded ? '<span class="badge badge-success">录制</span>' : '<span class="badge badge-muted">不录制</span>'}</td>
+                <td>${r.viewCount || 0}</td>
+                <td>${r.peakViewers || 0}</td>
+                <td>${r.likeCount || 0}</td>
+                <td style="white-space:nowrap;">${fmtDate(r.createdAt)}</td>
+                <td>${fmtDuration(r.duration)}</td>
+                <td>
+                    <div class="action-group">
+                        <button class="action-btn primary" data-action="view-room">查看</button>
+                        <button class="action-btn" data-action="stream-config">推流</button>
+                        <button class="action-btn" data-action="edit-room">编辑</button>
+                        ${r.status === 'LIVING' ? '<button class="action-btn" data-action="recordings">录制</button>' : ''}
+                        ${r.status === 'BANNED' ? '<button class="action-btn primary" data-action="unban-room">解禁</button>' : '<button class="action-btn danger" data-action="ban-room">封禁</button>'}
+                        <button class="action-btn" data-action="reset-key">重置密钥</button>
+                        <button class="action-btn" data-action="room-stats">统计</button>
+                        <button class="action-btn danger" data-action="delete-room">删除</button>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+        $('#liveRoomsTable tbody').innerHTML = rows || '<tr><td colspan="10" class="empty">暂无直播间</td></tr>';
+    }
+
+    function renderLiveRoomsPagination() {
+        const { page, pageSize, total } = STATE.liveRooms;
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        const from = (page - 1) * pageSize + 1;
+        const to = Math.min(page * pageSize, total);
+        let pages = '';
+        const maxShow = 5;
+        let start = Math.max(1, page - 2);
+        let end = Math.min(totalPages, start + maxShow - 1);
+        start = Math.max(1, end - maxShow + 1);
+        for (let i = start; i <= end; i++) {
+            pages += `<button class="page-btn ${i === page ? 'active' : ''}" data-live-page="${i}">${i}</button>`;
+        }
+        $('#liveRoomsPagination').innerHTML = `
+            <div class="page-info">共 ${total} 条 · 显示 ${from}-${to} / ${totalPages} 页</div>
+            <div class="page-controls">
+                <button class="page-btn" data-live-page="1" ${page === 1 ? 'disabled' : ''}>«</button>
+                <button class="page-btn" data-live-page="${page - 1}" ${page === 1 ? 'disabled' : ''}>‹</button>
+                ${pages}
+                <button class="page-btn" data-live-page="${page + 1}" ${page === totalPages ? 'disabled' : ''}>›</button>
+                <button class="page-btn" data-live-page="${totalPages}" ${page === totalPages ? 'disabled' : ''}>»</button>
+            </div>
+        `;
+    }
+
+    async function createLiveRoom() {
+        const catOpts = STATE.categories.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+        const body = document.createElement('div');
+        body.innerHTML = `
+            <form class="form" id="liveRoomForm">
+                <div class="form-row"><label class="form-label">标题 <span class="required">*</span></label><input class="input" name="title" required></div>
+                <div class="form-row"><label class="form-label">描述</label><textarea class="input" name="description" rows="2"></textarea></div>
+                <div class="form-row"><label class="form-label">封面URL</label><input class="input" name="coverUrl"></div>
+                <div class="form-row"><label class="form-label">分类</label>
+                    <select class="input" name="categoryId"><option value="">未分类</option>${catOpts}</select>
+                </div>
+                <div class="form-grid">
+                    <div class="form-row"><label class="form-label">最大码率 (kbps)</label><input class="input" name="maxBitrate" type="number" placeholder="可选"></div>
+                    <div class="form-row"><label class="form-label">录制格式</label>
+                        <select class="input" name="recordFormat">
+                            <option value="FLV">FLV</option>
+                            <option value="HLS">HLS</option>
+                            <option value="MP4">MP4</option>
+                        </select>
+                    </div>
+                </div>
+                <div style="display:flex;gap:20px;">
+                    <label class="checkbox"><input type="checkbox" name="isPublic" checked> 公开</label>
+                    <label class="checkbox"><input type="checkbox" name="isRecorded" checked> 自动录制</label>
+                </div>
+            </form>
+        `;
+        const footer = document.createElement('div');
+        footer.innerHTML = '<button class="btn btn-ghost" data-close="modal">取消</button><button class="btn btn-primary" id="saveRoomBtn">创建</button>';
+        modal.open({ title: '创建直播间', body, footer });
+        footer.querySelector('#saveRoomBtn').onclick = async () => {
+            const form = body.querySelector('#liveRoomForm');
+            const payload = {
+                title: form.title.value.trim(),
+                description: form.description.value || undefined,
+                coverUrl: form.coverUrl.value || undefined,
+                categoryId: form.categoryId.value || null,
+                isPublic: form.isPublic.checked,
+                isRecorded: form.isRecorded.checked,
+                recordFormat: form.recordFormat.value,
+                maxBitrate: form.maxBitrate.value ? Number(form.maxBitrate.value) : undefined,
+            };
+            if (!payload.title) { toast.warning('标题必填'); return; }
+            try {
+                await api.post('/live-rooms', payload);
+                toast.success('直播间已创建');
+                modal.close();
+                loadLiveRooms();
+            } catch (e) { toast.error(e.message); }
+        };
+    }
+
+    async function viewLiveRoom(id) {
+        try {
+            const res = await api.get('/live-rooms/' + id);
+            const r = res.data || {};
+            const streams = (r.streams || []).slice(0, 5).map(s => `
+                <tr>
+                    <td>${s.streamIndex}${s.isPrimary ? ' (主)' : ''}</td>
+                    <td>${s.protocol}</td>
+                    <td>${liveStreamStatusBadge(s.status)}</td>
+                    <td>${s.bitrate ? (s.bitrate / 1000) + ' kbps' : '-'}</td>
+                    <td>${s.width && s.height ? s.width + '×' + s.height : '-'}</td>
+                    <td>${fmtDate(s.connectedAt)}</td>
+                    <td>${fmtDuration(s.duration)}</td>
+                </tr>
+            `).join('');
+            const transcodes = (r.transcodes || []).slice(0, 5).map(t => `
+                <tr>
+                    <td>${escapeHtml(t.name)}</td>
+                    <td>${t.width}×${t.height}</td>
+                    <td>${t.videoBitrate / 1000} kbps</td>
+                    <td><span class="badge">${t.videoCodec}</span></td>
+                    <td>${t.latencyMs}ms</td>
+                    <td>${t.isBackup ? '<span class="badge badge-warning">备路</span>' : '<span class="badge badge-info">主路</span>'}</td>
+                    <td>${t.status === 'RUNNING' ? '<span class="badge badge-success">运行中</span>' : '<span class="badge badge-muted">已停止</span>'}</td>
+                </tr>
+            `).join('');
+            const html = `
+                <div class="detail-grid">
+                    <div class="label">标题</div><div class="value">${escapeHtml(r.title)}</div>
+                    <div class="label">状态</div><div class="value">${liveRoomStatusBadge(r.status)}</div>
+                    <div class="label">推流密钥</div><div class="value"><code style="font-size:12px;background:var(--bg-secondary);padding:2px 6px;border-radius:4px;">${escapeHtml(r.streamKey)}</code></div>
+                    <div class="label">分类</div><div class="value">${escapeHtml(r.category?.name || '-')}</div>
+                    <div class="label">公开</div><div class="value">${r.isPublic ? '是' : '否'}</div>
+                    <div class="label">自动录制</div><div class="value">${r.isRecorded ? '是 (' + r.recordFormat + ')' : '否'}</div>
+                    <div class="label">观看人数</div><div class="value">${r.viewCount || 0}</div>
+                    <div class="label">峰值观看</div><div class="value">${r.peakViewers || 0}</div>
+                    <div class="label">点赞数</div><div class="value">${r.likeCount || 0}</div>
+                    <div class="label">时长</div><div class="value">${fmtDuration(r.duration)}</div>
+                    <div class="label">创建时间</div><div class="value">${fmtDate(r.createdAt)}</div>
+                </div>
+                ${streams ? `<div style="margin-top:16px;"><strong style="font-size:13px;">推流记录</strong>
+                    <table class="table" style="margin-top:8px;">
+                        <thead><tr><th>序号</th><th>协议</th><th>状态</th><th>码率</th><th>分辨率</th><th>连接时间</th><th>时长</th></tr></thead>
+                        <tbody>${streams}</tbody>
+                    </table></div>` : ''}
+                ${transcodes ? `<div style="margin-top:16px;"><strong style="font-size:13px;">转码任务</strong>
+                    <table class="table" style="margin-top:8px;">
+                        <thead><tr><th>名称</th><th>分辨率</th><th>码率</th><th>编码</th><th>延迟</th><th>类型</th><th>状态</th></tr></thead>
+                        <tbody>${transcodes}</tbody>
+                    </table></div>` : ''}
+                ${r.description ? `<div style="margin-top:16px;"><strong style="font-size:13px;">描述</strong><div style="margin-top:4px;">${escapeHtml(r.description)}</div></div>` : ''}
+            `;
+            modal.open({ title: '直播间详情', body: html, size: 'lg', footer: '<button class="btn btn-ghost" data-close="modal">关闭</button>' });
+        } catch {}
+    }
+
+    async function editLiveRoom(id) {
+        try {
+            const res = await api.get('/live-rooms/' + id);
+            const r = res.data || {};
+            const catOpts = STATE.categories.map(c => `<option value="${c.id}" ${c.id === r.categoryId ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
+            const body = document.createElement('div');
+            body.innerHTML = `
+                <form class="form" id="editLiveRoomForm">
+                    <div class="form-row"><label class="form-label">标题</label><input class="input" name="title" value="${escapeAttr(r.title)}"></div>
+                    <div class="form-row"><label class="form-label">描述</label><textarea class="input" name="description" rows="2">${escapeHtml(r.description || '')}</textarea></div>
+                    <div class="form-row"><label class="form-label">封面URL</label><input class="input" name="coverUrl" value="${escapeAttr(r.coverUrl || '')}"></div>
+                    <div class="form-row"><label class="form-label">分类</label>
+                        <select class="input" name="categoryId"><option value="">未分类</option>${catOpts}</select>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-row"><label class="form-label">最大码率 (kbps)</label><input class="input" name="maxBitrate" type="number" value="${r.maxBitrate || ''}"></div>
+                        <div class="form-row"><label class="form-label">录制格式</label>
+                            <select class="input" name="recordFormat">
+                                <option value="FLV" ${r.recordFormat === 'FLV' ? 'selected' : ''}>FLV</option>
+                                <option value="HLS" ${r.recordFormat === 'HLS' ? 'selected' : ''}>HLS</option>
+                                <option value="MP4" ${r.recordFormat === 'MP4' ? 'selected' : ''}>MP4</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:20px;">
+                        <label class="checkbox"><input type="checkbox" name="isPublic" ${r.isPublic ? 'checked' : ''}> 公开</label>
+                        <label class="checkbox"><input type="checkbox" name="isRecorded" ${r.isRecorded ? 'checked' : ''}> 自动录制</label>
+                    </div>
+                </form>
+            `;
+            const footer = document.createElement('div');
+            footer.innerHTML = '<button class="btn btn-ghost" data-close="modal">取消</button><button class="btn btn-primary" id="saveEditRoomBtn">保存</button>';
+            modal.open({ title: '编辑直播间', body, footer });
+            footer.querySelector('#saveEditRoomBtn').onclick = async () => {
+                const form = body.querySelector('#editLiveRoomForm');
+                const payload = {
+                    title: form.title.value.trim(),
+                    description: form.description.value || undefined,
+                    coverUrl: form.coverUrl.value || undefined,
+                    categoryId: form.categoryId.value || null,
+                    isPublic: form.isPublic.checked,
+                    isRecorded: form.isRecorded.checked,
+                    recordFormat: form.recordFormat.value,
+                    maxBitrate: form.maxBitrate.value ? Number(form.maxBitrate.value) : undefined,
+                };
+                try {
+                    await api.put('/live-rooms/' + id, payload);
+                    toast.success('已保存');
+                    modal.close();
+                    loadLiveRooms();
+                } catch (e) { toast.error(e.message); }
+            };
+        } catch {}
+    }
+
+    async function deleteLiveRoom(id) {
+        const ok = await modal.confirm({ title: '删除直播间', message: '此操作不可恢复，确定要删除该直播间吗？', okText: '删除', danger: true });
+        if (!ok) return;
+        try {
+            await api.delete('/live-rooms/' + id);
+            toast.success('已删除');
+            loadLiveRooms();
+        } catch (e) { toast.error(e.message); }
+    }
+
+    async function banLiveRoom(id) {
+        const body = document.createElement('div');
+        body.innerHTML = `<form class="form"><div class="form-row"><label class="form-label">封禁原因</label><textarea class="input" name="reason" rows="2"></textarea></div></form>`;
+        const footer = document.createElement('div');
+        footer.innerHTML = '<button class="btn btn-ghost" data-close="modal">取消</button><button class="btn btn-danger" id="confirmBanBtn">封禁</button>';
+        modal.open({ title: '封禁直播间', body, footer });
+        footer.querySelector('#confirmBanBtn').onclick = async () => {
+            const reason = body.querySelector('[name=reason]').value;
+            try {
+                await api.post('/live-rooms/' + id + '/ban', { reason });
+                toast.success('已封禁');
+                modal.close();
+                loadLiveRooms();
+            } catch (e) { toast.error(e.message); }
+        };
+    }
+
+    async function unbanLiveRoom(id) {
+        const ok = await modal.confirm({ title: '解禁直播间', message: '确定要解除该直播间的封禁吗？', okText: '解禁' });
+        if (!ok) return;
+        try {
+            await api.post('/live-rooms/' + id + '/unban');
+            toast.success('已解禁');
+            loadLiveRooms();
+        } catch (e) { toast.error(e.message); }
+    }
+
+    async function resetStreamKey(id) {
+        const ok = await modal.confirm({ title: '重置推流密钥', message: '重置后旧密钥将失效，推流端需要使用新密钥重新推流。确定继续？', okText: '重置', danger: true });
+        if (!ok) return;
+        try {
+            const res = await api.post('/live-rooms/' + id + '/reset-key');
+            const body = document.createElement('div');
+            body.innerHTML = `<div style="text-align:center;padding:10px;">
+                <div style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">新推流密钥</div>
+                <div style="font-family:monospace;font-size:14px;background:var(--bg-secondary);padding:10px;border-radius:6px;word-break:break-all;">${escapeHtml(res.data.streamKey)}</div>
+            </div>`;
+            modal.open({ title: '密钥已重置', body, footer: '<button class="btn btn-primary" data-close="modal">确定</button>', size: 'sm' });
+            loadLiveRooms();
+        } catch (e) { toast.error(e.message); }
+    }
+
+    async function viewStreamConfig(id) {
+        try {
+            const res = await api.get('/live-rooms/' + id + '/stream-config');
+            const d = res.data || {};
+            const html = `
+                <div style="padding:10px 0;">
+                    <div class="form-row" style="margin-bottom:12px;">
+                        <label class="form-label">推流密钥</label>
+                        <div style="display:flex;gap:8px;">
+                            <input class="input" id="streamKeyInput" value="${escapeAttr(d.streamKey)}" readonly>
+                            <button class="btn btn-ghost" onclick="navigator.clipboard.writeText(document.getElementById('streamKeyInput').value)">复制</button>
+                        </div>
+                    </div>
+                    <div class="form-row" style="margin-bottom:12px;">
+                        <label class="form-label">RTMP 推流地址</label>
+                        <div style="display:flex;gap:8px;">
+                            <input class="input" value="${escapeAttr(d.pushUrl || 'rtmp://your-server/live/' + d.streamKey)}" readonly>
+                            <button class="btn btn-ghost" onclick="navigator.clipboard.writeText(this.previousElementSibling.value)">复制</button>
+                        </div>
+                    </div>
+                    <div style="font-size:12px;color:var(--text-muted);margin-top:16px;padding:10px;background:var(--bg-secondary);border-radius:6px;">
+                        <strong>推流说明：</strong><br>
+                        1. 使用 OBS 或其他推流软件<br>
+                        2. 服务器地址: <code>rtmp://your-server/live</code><br>
+                        3. 密钥: 上面的推流密钥<br>
+                        4. 推流开始后直播间状态将自动变为"直播中"
+                    </div>
+                    <div style="margin-top:16px;">
+                        <strong style="font-size:13px;">拉流地址</strong>
+                        <div style="margin-top:8px;font-size:12px;">
+                            ${d.playUrls?.hls ? `<div>HLS: <code>${escapeHtml(d.playUrls.hls)}</code></div>` : ''}
+                            ${d.playUrls?.flv ? `<div>FLV: <code>${escapeHtml(d.playUrls.flv)}</code></div>` : ''}
+                            ${d.playUrls?.webrtc ? `<div>WebRTC: <code>${escapeHtml(d.playUrls.webrtc)}</code></div>` : ''}
+                        </div>
+                    </div>
+                </div>
+            `;
+            modal.open({ title: '推流配置', body: html, size: 'lg', footer: '<button class="btn btn-primary" data-close="modal">关闭</button>' });
+        } catch (e) { toast.error(e.message); }
+    }
+
+    async function viewRoomStats(id) {
+        try {
+            const res = await api.get('/live-rooms/' + id + '/stats');
+            const s = res.data || {};
+            const html = `
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
+                    <div class="stat-card info"><div class="stat-label">观看人数</div><div class="stat-value">${s.viewCount || 0}</div></div>
+                    <div class="stat-card success"><div class="stat-label">峰值观看</div><div class="stat-value">${s.peakViewers || 0}</div></div>
+                    <div class="stat-card warning"><div class="stat-label">点赞数</div><div class="stat-value">${s.likeCount || 0}</div></div>
+                    <div class="stat-card"><div class="stat-label">弹幕数</div><div class="stat-value">${s.danmakuCount || 0}</div></div>
+                    <div class="stat-card"><div class="stat-label">礼物数</div><div class="stat-value">${s.giftCount || 0}</div></div>
+                    <div class="stat-card"><div class="stat-label">直播时长</div><div class="stat-value">${fmtDuration(s.duration)}</div></div>
+                </div>
+                <div style="margin-top:16px;font-size:12px;color:var(--text-muted);">
+                    ${s.startTime ? `<div>开始时间: ${fmtDate(s.startTime)}</div>` : ''}
+                    ${s.endTime ? `<div>结束时间: ${fmtDate(s.endTime)}</div>` : ''}
+                </div>
+            `;
+            modal.open({ title: '直播间统计', body: html, size: 'lg', footer: '<button class="btn btn-ghost" data-close="modal">关闭</button>' });
+        } catch (e) { toast.error(e.message); }
+    }
+
+    async function viewRoomRecordings(id) {
+        try {
+            const res = await api.get('/live-rooms/' + id + '/recordings');
+            const d = res.data || {};
+            const rows = (d.history || []).map(r => `
+                <tr>
+                    <td>${r.format}</td>
+                    <td>${r.status === 'COMPLETED' ? '<span class="badge badge-success">完成</span>' : r.status === 'RECORDING' ? '<span class="badge badge-warning">录制中</span>' : r.status === 'STOPPED' ? '<span class="badge badge-muted">已停止</span>' : '<span class="badge badge-danger">失败</span>'}</td>
+                    <td>${fmtSize(r.fileSize)}</td>
+                    <td>${fmtDuration(r.duration)}</td>
+                    <td style="white-space:nowrap;">${fmtDate(r.startedAt)}</td>
+                    <td>${r.segmentIndex || 0}</td>
+                </tr>
+            `).join('');
+            const html = `
+                <div style="margin-bottom:12px;"><span class="badge badge-info">录制中: ${(d.active || []).length}</span> <span class="badge">总计: ${(d.history || []).length}</span></div>
+                <table class="table">
+                    <thead><tr><th>格式</th><th>状态</th><th>大小</th><th>时长</th><th>开始时间</th><th>片段</th></tr></thead>
+                    <tbody>${rows || '<tr><td colspan="6" class="empty">暂无录制</td></tr>'}</tbody>
+                </table>
+            `;
+            modal.open({ title: '录制文件', body: html, size: 'lg', footer: '<button class="btn btn-ghost" data-close="modal">关闭</button>' });
+        } catch (e) { toast.error(e.message); }
+    }
+
+    async function loadGifts() {
+        try {
+            const res = await api.get('/live-interact/gifts');
+            STATE.gifts = res.data?.gifts || res.data || [];
+            renderGiftsTable();
+        } catch (e) {
+            $('#giftsTable tbody').innerHTML = `<tr><td colspan="6" class="empty">加载失败: ${escapeHtml(e.message)}</td></tr>`;
+        }
+    }
+
+    function renderGiftsTable() {
+        const rows = STATE.gifts.map(g => `
+            <tr>
+                <td><img src="${escapeHtml(g.iconUrl)}" alt="" style="width:32px;height:32px;border-radius:6px;vertical-align:middle;"> <strong>${escapeHtml(g.name)}</strong></td>
+                <td>${g.price}</td>
+                <td>${g.value}</td>
+                <td>${g.sortOrder || 0}</td>
+                <td>${g.status === 'ENABLED' ? '<span class="badge badge-success">启用</span>' : '<span class="badge badge-muted">禁用</span>'}</td>
+                <td>
+                    <div class="action-group">
+                        <button class="action-btn" data-action="edit-gift" data-id="${g.id}">编辑</button>
+                        <button class="action-btn" data-action="toggle-gift" data-id="${g.id}">${g.status === 'ENABLED' ? '禁用' : '启用'}</button>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+        $('#giftsTable tbody').innerHTML = rows || '<tr><td colspan="6" class="empty">暂无礼物</td></tr>';
+    }
+
+    async function createGift() {
+        const body = document.createElement('div');
+        body.innerHTML = `
+            <form class="form" id="giftForm">
+                <div class="form-row"><label class="form-label">名称 <span class="required">*</span></label><input class="input" name="name" required></div>
+                <div class="form-row"><label class="form-label">图标URL <span class="required">*</span></label><input class="input" name="iconUrl" required></div>
+                <div class="form-grid">
+                    <div class="form-row"><label class="form-label">价格 <span class="required">*</span></label><input class="input" name="price" type="number" step="0.01" required></div>
+                    <div class="form-row"><label class="form-label">价值 <span class="required">*</span></label><input class="input" name="value" type="number" required></div>
+                </div>
+                <div class="form-row"><label class="form-label">排序</label><input class="input" name="sortOrder" type="number" value="0"></div>
+            </form>
+        `;
+        const footer = document.createElement('div');
+        footer.innerHTML = '<button class="btn btn-ghost" data-close="modal">取消</button><button class="btn btn-primary" id="saveGiftBtn">创建</button>';
+        modal.open({ title: '创建礼物', body, footer, size: 'sm' });
+        footer.querySelector('#saveGiftBtn').onclick = async () => {
+            const form = body.querySelector('#giftForm');
+            const payload = {
+                name: form.name.value.trim(),
+                iconUrl: form.iconUrl.value.trim(),
+                price: Number(form.price.value),
+                value: Number(form.value.value),
+                sortOrder: Number(form.sortOrder.value) || 0,
+            };
+            try {
+                await api.post('/live-interact/gifts', payload);
+                toast.success('礼物已创建');
+                modal.close();
+                loadGifts();
+            } catch (e) { toast.error(e.message); }
+        };
+    }
+
+    async function editGift(id) {
+        const g = STATE.gifts.find(x => x.id === id);
+        if (!g) return;
+        const body = document.createElement('div');
+        body.innerHTML = `
+            <form class="form" id="editGiftForm">
+                <div class="form-row"><label class="form-label">名称</label><input class="input" name="name" value="${escapeAttr(g.name)}"></div>
+                <div class="form-row"><label class="form-label">图标URL</label><input class="input" name="iconUrl" value="${escapeAttr(g.iconUrl)}"></div>
+                <div class="form-grid">
+                    <div class="form-row"><label class="form-label">价格</label><input class="input" name="price" type="number" step="0.01" value="${g.price}"></div>
+                    <div class="form-row"><label class="form-label">价值</label><input class="input" name="value" type="number" value="${g.value}"></div>
+                </div>
+                <div class="form-row"><label class="form-label">排序</label><input class="input" name="sortOrder" type="number" value="${g.sortOrder || 0}"></div>
+            </form>
+        `;
+        const footer = document.createElement('div');
+        footer.innerHTML = '<button class="btn btn-ghost" data-close="modal">取消</button><button class="btn btn-primary" id="saveEditGiftBtn">保存</button>';
+        modal.open({ title: '编辑礼物', body, footer, size: 'sm' });
+        footer.querySelector('#saveEditGiftBtn').onclick = async () => {
+            const form = body.querySelector('#editGiftForm');
+            const payload = {
+                name: form.name.value.trim(),
+                iconUrl: form.iconUrl.value.trim(),
+                price: Number(form.price.value),
+                value: Number(form.value.value),
+                sortOrder: Number(form.sortOrder.value) || 0,
+            };
+            try {
+                await api.put('/live-interact/gifts/' + id, payload);
+                toast.success('已保存');
+                modal.close();
+                loadGifts();
+            } catch (e) { toast.error(e.message); }
+        };
+    }
+
+    async function toggleGift(id) {
+        const g = STATE.gifts.find(x => x.id === id);
+        if (!g) return;
+        const newStatus = g.status === 'ENABLED' ? 'DISABLED' : 'ENABLED';
+        try {
+            await api.put('/live-interact/gifts/' + id, { status: newStatus });
+            toast.success(newStatus === 'ENABLED' ? '已启用' : '已禁用');
+            loadGifts();
+        } catch (e) { toast.error(e.message); }
+    }
+
     function escapeHtml(s) {
         if (s == null) return '';
         return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1040,10 +1555,25 @@
             else if (action === 'delete' && e.target.closest('#categoriesTable')) deleteCategory(id);
 
             else if (action === 'delete' && e.target.closest('#objectsTable')) deleteObject(e.target.dataset.name);
+
+            else if (action === 'view-room') viewLiveRoom(id);
+            else if (action === 'edit-room') editLiveRoom(id);
+            else if (action === 'delete-room') deleteLiveRoom(id);
+            else if (action === 'ban-room') banLiveRoom(id);
+            else if (action === 'unban-room') unbanLiveRoom(id);
+            else if (action === 'reset-key') resetStreamKey(id);
+            else if (action === 'stream-config') viewStreamConfig(id);
+            else if (action === 'room-stats') viewRoomStats(id);
+            else if (action === 'recordings') viewRoomRecordings(id);
+
+            else if (action === 'edit-gift') editGift(id);
+            else if (action === 'toggle-gift') toggleGift(id);
         });
 
         $('#refreshBtn').addEventListener('click', () => switchTab(STATE.currentTab));
         $('#newUploadBtn').addEventListener('click', () => switchTab('upload'));
+        $('#newLiveRoomBtn').addEventListener('click', createLiveRoom);
+        $('#newGiftBtn').addEventListener('click', createGift);
         $('#videoSearch').addEventListener('input', debounce((e) => {
             STATE.videos.filters.search = e.target.value;
             STATE.videos.page = 1;
@@ -1077,6 +1607,28 @@
         });
         $('#refreshStorageBtn').addEventListener('click', loadStorage);
         $('#listObjectsBtn').addEventListener('click', listObjects);
+
+        $('#liveRoomSearch').addEventListener('input', debounce((e) => {
+            STATE.liveRooms.filters.search = e.target.value;
+            STATE.liveRooms.page = 1;
+            loadLiveRooms();
+        }, 300));
+        $('#liveRoomCategoryFilter').addEventListener('change', (e) => {
+            STATE.liveRooms.filters.categoryId = e.target.value;
+            STATE.liveRooms.page = 1;
+            loadLiveRooms();
+        });
+        $('#liveRoomStatusFilter').addEventListener('change', (e) => {
+            STATE.liveRooms.filters.status = e.target.value;
+            STATE.liveRooms.page = 1;
+            loadLiveRooms();
+        });
+        $('#liveRoomsPagination').addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-live-page]');
+            if (!btn || btn.disabled) return;
+            const p = parseInt(btn.dataset.livePage, 10);
+            if (!isNaN(p)) { STATE.liveRooms.page = p; loadLiveRooms(); }
+        });
 
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') modal.close();

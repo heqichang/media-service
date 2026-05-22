@@ -39,6 +39,12 @@
                 <a class="nav-item" data-tab="storage">
                     <span class="nav-icon">💾</span><span>存储管理</span>
                 </a>
+                <a class="nav-item" data-tab="live-rooms">
+                    <span class="nav-icon">📺</span><span>直播间管理</span>
+                </a>
+                <a class="nav-item" data-tab="live-gifts">
+                    <span class="nav-icon">🎁</span><span>礼物管理</span>
+                </a>
             </nav>
 
             <div class="sidebar-footer">
@@ -300,6 +306,74 @@
                                     </tr>
                                 </thead>
                                 <tbody><tr><td colspan="5" class="empty">点击"列出"查看对象列表</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="content">
+                <div class="tab-pane" id="tab-live-rooms">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>直播间管理</h3>
+                            <div class="filters">
+                                <input type="search" class="input" placeholder="搜索直播间..." id="liveRoomSearch">
+                                <select class="input" id="liveRoomCategoryFilter">
+                                    <option value="">全部分类</option>
+                                </select>
+                                <select class="input" id="liveRoomStatusFilter">
+                                    <option value="">全部状态</option>
+                                    <option value="NOT_STARTED">未开始</option>
+                                    <option value="LIVING">直播中</option>
+                                    <option value="ENDED">已结束</option>
+                                    <option value="BANNED">已封禁</option>
+                                </select>
+                                <button class="btn btn-primary" id="newLiveRoomBtn">+ 创建直播间</button>
+                            </div>
+                        </div>
+                        <div class="table-wrapper">
+                            <table class="table" id="liveRoomsTable">
+                                <thead>
+                                    <tr>
+                                        <th>标题</th>
+                                        <th>状态</th>
+                                        <th>分类</th>
+                                        <th>录制</th>
+                                        <th>观看</th>
+                                        <th>峰值</th>
+                                        <th>点赞</th>
+                                        <th>创建时间</th>
+                                        <th>时长</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody><tr><td colspan="10" class="empty">加载中...</td></tr></tbody>
+                            </table>
+                        </div>
+                        <div class="pagination" id="liveRoomsPagination"></div>
+                    </div>
+                </div>
+
+                <div class="tab-pane" id="tab-live-gifts">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>礼物管理</h3>
+                            <button class="btn btn-primary" id="newGiftBtn">+ 创建礼物</button>
+                        </div>
+                        <div class="table-wrapper">
+                            <table class="table" id="giftsTable">
+                                <thead>
+                                    <tr>
+                                        <th>礼物</th>
+                                        <th>价格</th>
+                                        <th>价值</th>
+                                        <th>排序</th>
+                                        <th>状态</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody><tr><td colspan="6" class="empty">加载中...</td></tr></tbody>
                             </table>
                         </div>
                     </div>
