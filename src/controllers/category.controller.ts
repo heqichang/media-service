@@ -61,7 +61,7 @@ export class CategoryController {
       }
 
       const category = await prisma.category.create({
-        data: validated,
+        data: validated as any,
       });
 
       successResponse(res, category, 'Category created successfully', 201);

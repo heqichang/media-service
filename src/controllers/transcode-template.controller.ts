@@ -51,7 +51,7 @@ export class TranscodeTemplateController {
   static async createTemplate(req: Request, res: Response) {
     try {
       const validated = createTemplateSchema.parse(req.body);
-      const template = await TranscodeTemplateService.createTemplate(validated);
+      const template = await TranscodeTemplateService.createTemplate(validated as any);
       successResponse(res, template, 'Template created successfully', 201);
     } catch (error: any) {
       if (error instanceof z.ZodError) {

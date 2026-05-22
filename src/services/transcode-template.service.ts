@@ -111,8 +111,9 @@ export class TranscodeTemplateService {
     return prisma.transcodeTemplate.create({
       data: {
         ...data,
+        description: data.description ?? null,
         isPreset: false,
-      },
+      } as any,
     });
   }
 

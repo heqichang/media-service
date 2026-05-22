@@ -170,7 +170,9 @@ export class UploadController {
 
       writeStream.end();
 
-      await new Promise((resolve) => writeStream.on('finish', resolve));
+      await new Promise<void>((resolve) => {
+        writeStream.on('finish', () => resolve());
+      });
 
       fs.rmSync(chunkDir, { recursive: true, force: true });
 

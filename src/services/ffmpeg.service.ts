@@ -33,7 +33,7 @@ export class FFmpegService {
           duration: metadata.format.duration || 0,
           width: videoStream.width || 0,
           height: videoStream.height || 0,
-          bitrate: parseInt(metadata.format.bit_rate || '0', 10),
+          bitrate: parseInt(String(metadata.format.bit_rate || '0'), 10) || 0,
           format: metadata.format.format_name || '',
           videoCodec: videoStream.codec_name || '',
           audioCodec: audioStream?.codec_name || '',
@@ -227,8 +227,8 @@ export class FFmpegService {
           .frames(1)
           .size(`${thumbnailWidth}x${thumbnailHeight}`)
           .output(path.join(tempDir, `thumb_${i.toString().padStart(5, '0')}.${ext}`))
-          .on('end', resolve)
-          .on('error', reject)
+          .on('end', () => resolve())
+          .on('error', (err) => reject(err))
           .run();
       });
     }
@@ -241,8 +241,8 @@ export class FFmpegService {
         .addOption('-tile', `${columns}x${rows}`)
         .addOption('-layout', `${columns}x${rows}`)
         .output(spritePath)
-        .on('end', resolve)
-        .on('error', reject)
+        .on('end', () => resolve())
+        .on('error', (err) => reject(err))
         .run();
     });
 

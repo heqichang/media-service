@@ -121,6 +121,11 @@ transcodeQueue.process(config.transcode.concurrency, async (job) => {
       },
     });
 
+    await prisma.video.update({
+      where: { id: videoId },
+      data: { status: VideoStatus.FAILED },
+    }).catch(() => {});
+
     throw error;
   }
 });

@@ -22,6 +22,23 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));
 
+app.use((req, res, next) => {
+  const originalJson = res.json.bind(res);
+  res.json = ((body: any) => {
+    if (body !== null && typeof body === 'object') {
+      const serialized = JSON.stringify(body, (key, value) => {
+        if (typeof value === 'bigint') {
+          return value.toString();
+        }
+        return value;
+      });
+      return res.type('application/json').send(serialized);
+    }
+    return originalJson(body);
+  }) as any;
+  next();
+});
+
 app.use('/static', express.static(path.join(__dirname, '..', 'public')));
 app.use('/uploads', express.static(config.upload.tempDir));
 
