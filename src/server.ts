@@ -61,6 +61,8 @@ app.get('/', (req, res) => {
   });
 });
 
+app.use('/admin', express.static(path.join(__dirname, '..', 'public', 'admin.html')));
+
 app.use('/player', express.static(path.join(__dirname, '..', 'public', 'player.html')));
 
 app.get('/player/:videoId', (req, res) => {
