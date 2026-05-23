@@ -46,6 +46,10 @@ class LiveStreamService extends EventEmitter {
     this.streamKeyToRoom.delete(streamKey);
   }
 
+  isStreamKeyKnown(streamKey: string): boolean {
+    return this.streamKeyToRoom.has(streamKey);
+  }
+
   generateStreamKey(): string {
     const length = config.live.auth.streamKeyLength;
     return crypto.randomBytes(Math.ceil(length / 2))

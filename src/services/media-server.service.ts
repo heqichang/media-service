@@ -1,4 +1,5 @@
 import NodeMediaServer from 'node-media-server';
+import { spawn as spawnChild } from 'child_process';
 import { config } from '../config';
 import { liveStreamService } from './live-stream.service';
 import { liveRoomService } from './live-room.service';
@@ -8,6 +9,8 @@ import { liveInteractService } from './live-interact.service';
 export class MediaServerService {
   private nms: any | null = null;
   private srtProcess: any | null = null;
+  private srtRestartCount = 0;
+  private hlsProcesses: Map<string, any> = new Map();
 
   private activeStreams: Map<string, {
     liveRoomId: string;
@@ -48,19 +51,6 @@ export class MediaServerService {
         allow_origin: '*',
         api: true,
       },
-      trans: {
-        ffmpeg: config.ffmpeg.ffmpegPath,
-        tasks: [
-          {
-            app: 'live',
-            ac: 'aac',
-            vc: 'libx264',
-            hls: true,
-            hlsFlags: '[hls_time=' + config.live.hls.time + ':hls_list_size=' + config.live.hls.listSize + ':hls_flags=delete_segments]',
-            hlsKeep: false,
-          },
-        ],
-      },
       auth: {
         api: true,
         api_user: 'admin',
@@ -72,7 +62,7 @@ export class MediaServerService {
 
     this.nms = new NodeMediaServer(nmsConfig);
 
-    this.nms.on('prePublish', async (session: any) => {
+    this.nms.on('prePublish', (session: any) => {
       console.log('[MediaServer] === prePublish triggered ===');
       console.log('[MediaServer] Session info:', {
         id: session.id,
@@ -80,86 +70,26 @@ export class MediaServerService {
         streamName: session.streamName,
         streamApp: session.streamApp,
         ip: session.ip,
-        connectTime: session.connectTime,
       });
 
       const streamKey = this.extractStreamKey(session);
       if (!streamKey) {
-        console.log('[MediaServer] No stream key found, rejecting connection');
+        console.log('[MediaServer] No stream key found, closing session');
         session.close();
         return;
       }
 
-      console.log('[MediaServer] Authenticating stream key:', streamKey);
-
-      try {
-        const authResult = await liveStreamService.authenticatePush(
-          streamKey,
-          session.ip || '127.0.0.1',
-          'rtmp'
-        );
-
-        console.log('[MediaServer] Auth result:', {
-          allowed: authResult.allowed,
-          reason: authResult.reason,
-          liveRoomId: authResult.liveRoomId,
-        });
-
-        if (!authResult.allowed) {
-          console.log('[MediaServer] Auth failed:', authResult.reason);
-          session.close();
-          return;
-        }
-
-        const streamSession = await liveStreamService.registerStream(
-          authResult.liveRoomId!,
-          streamKey,
-          session.ip || '127.0.0.1',
-          'rtmp'
-        );
-
-        console.log('[MediaServer] Stream registered:', {
-          streamId: streamSession.streamId,
-          isPrimary: streamSession.isPrimary,
-        });
-
-        this.activeStreams.set(session.id, {
-          liveRoomId: authResult.liveRoomId!,
-          streamKey,
-          sessionId: streamSession.streamId,
-          startedAt: new Date(),
-          isPrimary: streamSession.isPrimary,
-        });
-
-        console.log('[MediaServer] Stream authenticated:', {
-          liveRoomId: authResult.liveRoomId,
-          streamId: streamSession.streamId,
-          isPrimary: streamSession.isPrimary,
-        });
-
-        if (streamSession.isPrimary) {
-          const room = await liveRoomService.getRoom(authResult.liveRoomId!);
-          if (room && room.isRecorded) {
-            await liveRecordService.startRecording(authResult.liveRoomId!, {
-              format: (room.recordFormat || 'FLV').toLowerCase() as any,
-            }).catch(err => console.error('[MediaServer] Error starting recording:', err));
-          }
-
-          const publicHost = config.server.publicHost || 'localhost';
-          const baseHttpUrl = 'http://' + publicHost + ':' + config.server.port;
-          await liveRoomService.updatePlayUrls(authResult.liveRoomId!, {
-            hls: baseHttpUrl + '/hls/' + streamKey + '/index.m3u8',
-            flv: baseHttpUrl + '/live/' + streamKey + '.flv',
-            rtc: null,
-          }).catch(err => console.error('[MediaServer] Error updating play URLs:', err));
-
-          await liveRoomService.updateLiveRoomStatus(authResult.liveRoomId!, 'LIVING')
-            .catch(err => console.error('[MediaServer] Error updating room status:', err));
-        }
-      } catch (error: any) {
-        console.error('[MediaServer] Auth error:', error.message);
+      if (!liveStreamService.isStreamKeyKnown(streamKey)) {
+        console.log('[MediaServer] Unknown stream key, closing session:', streamKey);
         session.close();
+        return;
       }
+
+      console.log('[MediaServer] Stream key accepted (sync check), starting async setup:', streamKey);
+
+      this.handleStreamPublish(session, streamKey).catch(err => {
+        console.error('[MediaServer] Async stream setup failed:', err.message);
+      });
     });
 
     this.nms.on('postPublish', (session: any) => {
@@ -179,6 +109,8 @@ export class MediaServerService {
       if (streamInfo) {
         liveStreamService.unregisterStream(streamInfo.liveRoomId, streamInfo.sessionId)
           .catch(err => console.error('[MediaServer] Error unregistering stream:', err));
+
+        this.stopHlsProcess(streamInfo.liveRoomId);
 
         if (streamInfo.isPrimary) {
           liveRecordService.stopAllRecordings(streamInfo.liveRoomId)
@@ -222,23 +154,158 @@ export class MediaServerService {
       const publicHost = config.server.publicHost || 'localhost';
       console.log('[MediaServer] Node-Media-Server started successfully');
       console.log('[MediaServer] RTMP server on port', config.live.rtmp.port);
-      console.log('[MediaServer] HTTP/FLV/HLS server on port', config.live.flv.port);
+      console.log('[MediaServer] HTTP/FLV server on port', config.live.flv.port);
       console.log('[MediaServer] RTMP Push URL: rtmp://' + publicHost + ':' + config.live.rtmp.port + '/live/{streamKey}');
-      console.log('[MediaServer] HLS Play URL (via Express): http://' + publicHost + ':' + config.server.port + '/hls/{streamKey}/index.m3u8');
-      console.log('[MediaServer] FLV Play URL (via Express): http://' + publicHost + ':' + config.server.port + '/live/{streamKey}.flv');
-      console.log('[MediaServer] HLS Play URL (direct NMS): http://' + publicHost + ':' + config.live.flv.port + '/live/{streamKey}/index.m3u8');
-      console.log('[MediaServer] FLV Play URL (direct NMS): http://' + publicHost + ':' + config.live.flv.port + '/live/{streamKey}.flv');
+      console.log('[MediaServer] FLV Play URL: http://' + publicHost + ':' + config.server.port + '/live/{streamKey}.flv');
+      console.log('[MediaServer] HLS Play URL: http://' + publicHost + ':' + config.server.port + '/hls/{streamKey}/index.m3u8');
     } catch (error: any) {
       console.error('[MediaServer] Failed to start Node-Media-Server:', error.message);
     }
   }
 
+  private async handleStreamPublish(session: any, streamKey: string): Promise<void> {
+    try {
+      const authResult = await liveStreamService.authenticatePush(
+        streamKey,
+        session.ip || '127.0.0.1',
+        'rtmp'
+      );
+
+      console.log('[MediaServer] Auth result:', {
+        allowed: authResult.allowed,
+        reason: authResult.reason,
+        liveRoomId: authResult.liveRoomId,
+      });
+
+      if (!authResult.allowed) {
+        console.log('[MediaServer] Auth failed:', authResult.reason);
+        session.close();
+        return;
+      }
+
+      const streamSession = await liveStreamService.registerStream(
+        authResult.liveRoomId!,
+        streamKey,
+        session.ip || '127.0.0.1',
+        'rtmp'
+      );
+
+      console.log('[MediaServer] Stream registered:', {
+        streamId: streamSession.streamId,
+        isPrimary: streamSession.isPrimary,
+      });
+
+      this.activeStreams.set(session.id, {
+        liveRoomId: authResult.liveRoomId!,
+        streamKey,
+        sessionId: streamSession.streamId,
+        startedAt: new Date(),
+        isPrimary: streamSession.isPrimary,
+      });
+
+      if (streamSession.isPrimary) {
+        const room = await liveRoomService.getRoom(authResult.liveRoomId!);
+        if (room && room.isRecorded) {
+          liveRecordService.startRecording(authResult.liveRoomId!, {
+            format: (room.recordFormat || 'FLV').toLowerCase() as any,
+          }).catch(err => console.error('[MediaServer] Error starting recording:', err));
+        }
+
+        const publicHost = config.server.publicHost || 'localhost';
+        const baseHttpUrl = 'http://' + publicHost + ':' + config.server.port;
+        liveRoomService.updatePlayUrls(authResult.liveRoomId!, {
+          hls: baseHttpUrl + '/hls/' + streamKey + '/index.m3u8',
+          flv: baseHttpUrl + '/live/' + streamKey + '.flv',
+          rtc: null,
+        }).catch(err => console.error('[MediaServer] Error updating play URLs:', err));
+
+        liveRoomService.updateLiveRoomStatus(authResult.liveRoomId!, 'LIVING')
+          .catch(err => console.error('[MediaServer] Error updating room status:', err));
+
+        this.startHlsProcess(authResult.liveRoomId!, streamKey);
+      }
+
+      console.log('[MediaServer] Stream setup complete:', {
+        liveRoomId: authResult.liveRoomId,
+        streamId: streamSession.streamId,
+        isPrimary: streamSession.isPrimary,
+      });
+    } catch (error: any) {
+      console.error('[MediaServer] Stream setup error:', error.message);
+    }
+  }
+
+  private startHlsProcess(liveRoomId: string, streamKey: string): void {
+    if (this.hlsProcesses.has(liveRoomId)) {
+      return;
+    }
+
+    const hlsDir = config.live.hls.segmentDir + '/live/' + streamKey;
+    const fs = require('fs');
+    fs.mkdirSync(hlsDir, { recursive: true });
+
+    const args = [
+      '-i', 'rtmp://127.0.0.1:' + config.live.rtmp.port + '/live/' + streamKey,
+      '-c:v', 'libx264',
+      '-preset', 'veryfast',
+      '-tune', 'zerolatency',
+      '-c:a', 'aac',
+      '-f', 'hls',
+      '-hls_time', String(config.live.hls.time),
+      '-hls_list_size', String(config.live.hls.listSize),
+      '-hls_flags', 'delete_segments+append_list',
+      '-hls_segment_filename', hlsDir + '/segment_%03d.ts',
+      hlsDir + '/index.m3u8',
+    ];
+
+    console.log('[MediaServer] Starting HLS process for room', liveRoomId);
+
+    const proc = spawnChild(config.ffmpeg.ffmpegPath, args, {
+      stdio: 'pipe',
+      shell: false,
+    });
+
+    if (proc.stderr) {
+      proc.stderr.on('data', (data: Buffer) => {
+        const lines = data.toString().split('\n').filter(Boolean);
+        for (const line of lines) {
+          if (line.includes('error') || line.includes('Error')) {
+            console.error('[MediaServer][HLS stderr]', line);
+          }
+        }
+      });
+    }
+
+    proc.on('error', (err: Error) => {
+      console.error('[MediaServer] HLS process error:', err.message);
+    });
+
+    proc.on('exit', (code: number) => {
+      console.log('[MediaServer] HLS process exited with code', code, 'for room', liveRoomId);
+      this.hlsProcesses.delete(liveRoomId);
+    });
+
+    this.hlsProcesses.set(liveRoomId, proc);
+  }
+
+  private stopHlsProcess(liveRoomId: string): void {
+    const proc = this.hlsProcesses.get(liveRoomId);
+    if (proc) {
+      console.log('[MediaServer] Stopping HLS process for room', liveRoomId);
+      proc.kill('SIGTERM');
+      this.hlsProcesses.delete(liveRoomId);
+    }
+  }
+
   private startSrtServer(): void {
+    if (this.srtRestartCount >= 5) {
+      console.error('[MediaServer] SRT relay has failed', this.srtRestartCount, 'times, giving up. Check if port', config.live.srt.port, 'is in use.');
+      return;
+    }
+
     console.log('[MediaServer] SRT server starting on port', config.live.srt.port);
 
     try {
-      const { spawn } = require('child_process');
-
       const srtCommand = [
         '-i', 'srt://0.0.0.0:' + config.live.srt.port + '?mode=listener&pkt_size=1316&maxbw=' + config.live.srt.maxBandwidth + '&latency=' + config.live.srt.latency,
         '-c', 'copy',
@@ -248,32 +315,25 @@ export class MediaServerService {
 
       console.log('[MediaServer] SRT relay command: ffmpeg', srtCommand.join(' '));
 
-      this.srtProcess = spawn(config.ffmpeg.ffmpegPath, srtCommand, {
+      this.srtProcess = spawnChild(config.ffmpeg.ffmpegPath, srtCommand, {
         stdio: 'pipe',
         shell: false,
       });
-
-      if (this.srtProcess.stdout) {
-        this.srtProcess.stdout.on('data', (data: Buffer) => {
-          console.log('[MediaServer][SRT stdout]', data.toString());
-        });
-      }
 
       if (this.srtProcess.stderr) {
         this.srtProcess.stderr.on('data', (data: Buffer) => {
           const lines = data.toString().split('\n').filter(Boolean);
           for (const line of lines) {
-            if (line.includes('error') || line.includes('Error')) {
+            if (line.includes('error') || line.includes('Error') || line.includes('-10048')) {
               console.error('[MediaServer][SRT stderr]', line);
-            } else {
-              console.log('[MediaServer][SRT stderr]', line);
             }
           }
         });
       }
 
       this.srtProcess.on('spawn', () => {
-        console.log('[MediaServer] SRT relay process started, forwarding to RTMP');
+        console.log('[MediaServer] SRT relay process started');
+        this.srtRestartCount = 0;
       });
 
       this.srtProcess.on('error', (err: Error) => {
@@ -283,12 +343,13 @@ export class MediaServerService {
       this.srtProcess.on('exit', (code: number) => {
         console.log('[MediaServer] SRT relay exited with code', code);
         if (code !== 0) {
-          console.log('[MediaServer] SRT relay will restart...');
+          this.srtRestartCount++;
+          console.log('[MediaServer] SRT relay restart attempt', this.srtRestartCount, '/ 5 in 10 seconds...');
           setTimeout(() => {
-            if (config.live.srt.enabled) {
+            if (config.live.srt.enabled && this.srtRestartCount < 5) {
               this.startSrtServer();
             }
-          }, 5000);
+          }, 10000);
         }
       });
     } catch (error: any) {
