@@ -5,6 +5,7 @@ import { liveStreamService } from '../services/live-stream.service';
 import { liveTranscodeService } from '../services/live-transcode.service';
 import { liveRecordService } from '../services/live-record.service';
 import { livePlayService } from '../services/live-play.service';
+import { config } from '../config';
 
 export class LiveRoomController {
   static async createRoom(req: Request, res: Response) {
@@ -159,14 +160,18 @@ export class LiveRoomController {
         return errorResponse(res, 'Live room not found', 404);
       }
 
-      const pushUrl = `rtmp://your-server/live/${room.streamKey}`;
-      const playUrls = await livePlayService.getPlayUrls(id);
+      const host = config.server.publicHost || req.hostname || 'localhost';
+      const pushUrl = `rtmp://${host}:${config.live.rtmp.port}/live/${room.streamKey}`;
+      const playUrls = await livePlayService.getPlayUrls(id, host);
 
       successResponse(res, {
         streamKey: room.streamKey,
         pushUrl,
         playUrls,
         status: room.status,
+        rtmpPort: config.live.rtmp.port,
+        httpPort: config.live.flv.port,
+        host,
       });
     } catch (error: any) {
       errorResponse(res, error.message, 500);
@@ -275,7 +280,8 @@ export class LiveRoomController {
     try {
       const { id } = req.params;
 
-      const urls = await livePlayService.getPlayUrls(id);
+      const host = config.server.publicHost || req.hostname || 'localhost';
+      const urls = await livePlayService.getPlayUrls(id, host);
 
       successResponse(res, urls);
     } catch (error: any) {

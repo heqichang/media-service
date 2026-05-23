@@ -1299,6 +1299,7 @@
         try {
             const res = await api.get('/live-rooms/' + id + '/stream-config');
             const d = res.data || {};
+            const rtmpBase = d.pushUrl ? d.pushUrl.substring(0, d.pushUrl.lastIndexOf('/')) : '';
             const html = `
                 <div style="padding:10px 0;">
                     <div class="form-row" style="margin-bottom:12px;">
@@ -1311,23 +1312,24 @@
                     <div class="form-row" style="margin-bottom:12px;">
                         <label class="form-label">RTMP 推流地址</label>
                         <div style="display:flex;gap:8px;">
-                            <input class="input" value="${escapeAttr(d.pushUrl || 'rtmp://your-server/live/' + d.streamKey)}" readonly>
+                            <input class="input" value="${escapeAttr(d.pushUrl || '')}" readonly>
                             <button class="btn btn-ghost" onclick="navigator.clipboard.writeText(this.previousElementSibling.value)">复制</button>
                         </div>
                     </div>
                     <div style="font-size:12px;color:var(--text-muted);margin-top:16px;padding:10px;background:var(--bg-secondary);border-radius:6px;">
                         <strong>推流说明：</strong><br>
                         1. 使用 OBS 或其他推流软件<br>
-                        2. 服务器地址: <code>rtmp://your-server/live</code><br>
+                        2. 服务器地址: <code>${escapeHtml(rtmpBase)}</code><br>
                         3. 密钥: 上面的推流密钥<br>
                         4. 推流开始后直播间状态将自动变为"直播中"
                     </div>
                     <div style="margin-top:16px;">
                         <strong style="font-size:13px;">拉流地址</strong>
                         <div style="margin-top:8px;font-size:12px;">
-                            ${d.playUrls?.hls ? `<div>HLS: <code>${escapeHtml(d.playUrls.hls)}</code></div>` : ''}
-                            ${d.playUrls?.flv ? `<div>FLV: <code>${escapeHtml(d.playUrls.flv)}</code></div>` : ''}
-                            ${d.playUrls?.webrtc ? `<div>WebRTC: <code>${escapeHtml(d.playUrls.webrtc)}</code></div>` : ''}
+                            ${d.playUrls?.hls ? `<div style="margin-bottom:6px;">HLS: <code style="word-break:break-all;">${escapeHtml(d.playUrls.hls)}</code></div>` : ''}
+                            ${d.playUrls?.flv ? `<div style="margin-bottom:6px;">FLV: <code style="word-break:break-all;">${escapeHtml(d.playUrls.flv)}</code></div>` : ''}
+                            ${d.playUrls?.webrtc ? `<div>WebRTC: <code style="word-break:break-all;">${escapeHtml(d.playUrls.webrtc)}</code></div>` : ''}
+                            ${!d.playUrls?.hls && !d.playUrls?.flv && !d.playUrls?.webrtc ? '<div style="color:var(--text-dim);">拉流地址将在推流开始后自动生成</div>' : ''}
                         </div>
                     </div>
                 </div>

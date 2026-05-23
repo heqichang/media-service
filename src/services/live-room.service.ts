@@ -44,6 +44,8 @@ class LiveRoomService extends EventEmitter {
       },
     });
 
+    liveStreamService.updateStreamKeyCache(streamKey, room.id);
+
     this.emit('room:create', room);
 
     return room;
@@ -140,7 +142,7 @@ class LiveRoomService extends EventEmitter {
 
     if (!room) return;
 
-    if (room.streams.length > 0) {
+    if (room.status !== 'BANNED' && room.streams.length > 0) {
       throw new Error('Cannot delete room while streaming');
     }
 
@@ -186,12 +188,23 @@ class LiveRoomService extends EventEmitter {
   }
 
   async resetStreamKey(id: string): Promise<{ streamKey: string }> {
+    const room = await prisma.liveRoom.findUnique({
+      where: { id },
+      select: { streamKey: true },
+    });
+
+    if (room) {
+      liveStreamService.removeStreamKeyCache(room.streamKey);
+    }
+
     const newKey = liveStreamService.generateStreamKey();
 
     await prisma.liveRoom.update({
       where: { id },
       data: { streamKey: newKey },
     });
+
+    liveStreamService.updateStreamKeyCache(newKey, id);
 
     this.emit('room:reset-key', { id, newKey });
 

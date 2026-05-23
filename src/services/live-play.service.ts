@@ -116,7 +116,7 @@ class LivePlayService extends EventEmitter {
     this.emit('play:invalidate', { token });
   }
 
-  async getPlayUrls(liveRoomId: string): Promise<{ hls?: string; flv?: string; webrtc?: string }> {
+  async getPlayUrls(liveRoomId: string, host?: string): Promise<{ hls?: string; flv?: string; webrtc?: string }> {
     const room = await prisma.liveRoom.findUnique({
       where: { id: liveRoomId },
     });
@@ -125,26 +125,34 @@ class LivePlayService extends EventEmitter {
       return {};
     }
 
+    const publicHost = host || config.server.publicHost || 'localhost';
+    const baseHttpUrl = 'http://' + publicHost + ':' + config.server.port;
+    const streamKey = room.streamKey;
+
     const urls: { hls?: string; flv?: string; webrtc?: string } = {};
 
     if (config.live.hls.enabled) {
       if (config.live.cdn.enabled && config.live.cdn.baseUrl) {
-        urls.hls = `${config.live.cdn.baseUrl}${config.live.cdn.hlsPath}/${liveRoomId}/index.m3u8`;
+        urls.hls = `${config.live.cdn.baseUrl}${config.live.cdn.hlsPath}/${streamKey}/index.m3u8`;
+      } else if (room.playUrlHls) {
+        urls.hls = room.playUrlHls;
       } else {
-        urls.hls = room.playUrlHls || `/hls/${liveRoomId}/index.m3u8`;
+        urls.hls = baseHttpUrl + '/hls/' + streamKey + '/index.m3u8';
       }
     }
 
     if (config.live.flv.enabled) {
       if (config.live.cdn.enabled && config.live.cdn.baseUrl) {
-        urls.flv = `${config.live.cdn.baseUrl}${config.live.cdn.flvPath}/${liveRoomId}.flv`;
+        urls.flv = `${config.live.cdn.baseUrl}${config.live.cdn.flvPath}/${streamKey}.flv`;
+      } else if (room.playUrlFlv) {
+        urls.flv = room.playUrlFlv;
       } else {
-        urls.flv = room.playUrlFlv || `/live/${liveRoomId}.flv`;
+        urls.flv = baseHttpUrl + '/live/' + streamKey + '.flv';
       }
     }
 
     if (config.live.webrtc.enabled) {
-      urls.webrtc = room.playUrlRtc || `/webrtc/${liveRoomId}`;
+      urls.webrtc = room.playUrlRtc || baseHttpUrl + '/webrtc/' + liveRoomId;
     }
 
     return urls;

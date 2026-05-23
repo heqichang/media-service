@@ -56,7 +56,65 @@ app.use('/recordings', express.static(config.live.record.outputDir));
 
 app.use('/api/v1', routes);
 
+app.get('/live/*.flv', (req, res) => {
+  const streamPath = req.path;
+  const nmsPort = config.live.flv.port;
+
+  console.log('[FLV Proxy] Proxying:', streamPath, '-> 127.0.0.1:' + nmsPort + streamPath);
+
+  const options = {
+    hostname: '127.0.0.1',
+    port: nmsPort,
+    path: streamPath,
+    method: 'GET',
+    headers: {
+      'User-Agent': req.headers['user-agent'] || 'Node.js-Proxy',
+      'Accept': '*/*',
+      'Connection': 'keep-alive',
+    },
+  };
+
+  const proxyReq = http.request(options, (proxyRes) => {
+    console.log('[FLV Proxy] NMS response:', {
+      statusCode: proxyRes.statusCode,
+      contentType: proxyRes.headers['content-type'],
+    });
+
+    res.writeHead(proxyRes.statusCode || 500, {
+      'Content-Type': proxyRes.headers['content-type'] || 'video/x-flv',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Range',
+      'Access-Control-Expose-Headers': 'Content-Length, Content-Range',
+    });
+
+    proxyRes.on('error', (err: Error) => {
+      console.error('[FLV Proxy] Proxy response error:', err.message);
+      if (!res.headersSent) {
+        res.status(502).end();
+      }
+    });
+
+    proxyRes.pipe(res);
+  });
+
+  proxyReq.on('error', (err: Error) => {
+    console.error('[FLV Proxy] Proxy request error:', err.message);
+    if (!res.headersSent) {
+      res.status(502).json({ error: 'Failed to connect to media server: ' + err.message });
+    }
+  });
+
+  req.on('close', () => {
+    console.log('[FLV Proxy] Client disconnected, destroying proxy request');
+    proxyReq.destroy();
+  });
+
+  proxyReq.end();
+});
+
 app.get('/', (req, res) => {
+  const publicHost = config.server.publicHost || req.hostname || 'localhost';
   res.json({
     name: 'Media Service API',
     version: '1.0.0',
@@ -74,10 +132,10 @@ app.get('/', (req, res) => {
       socket: '/socket.io',
     },
     liveProtocols: {
-      rtmp: config.live.rtmp.enabled ? 'rtmp://localhost:' + config.live.rtmp.port + '/live' : null,
-      srt: config.live.srt.enabled ? 'srt://localhost:' + config.live.srt.port : null,
-      hls: config.live.hls.enabled ? '/hls/{roomId}/index.m3u8' : null,
-      flv: config.live.flv.enabled ? '/live/{roomId}.flv' : null,
+      rtmp: config.live.rtmp.enabled ? 'rtmp://' + publicHost + ':' + config.live.rtmp.port + '/live' : null,
+      srt: config.live.srt.enabled ? 'srt://' + publicHost + ':' + config.live.srt.port : null,
+      hls: config.live.hls.enabled ? '/hls/{streamKey}/index.m3u8' : null,
+      flv: config.live.flv.enabled ? '/live/{streamKey}.flv' : null,
       webrtc: config.live.webrtc.enabled ? '/webrtc/{roomId}' : null,
     },
   });
@@ -95,14 +153,20 @@ app.get('/player/:videoId', (req, res) => {
   }
 });
 
-app.get('/live-player/:roomId', (req, res) => {
-  res.json({
-    liveRoomId: req.params.roomId,
-    hlsUrl: '/hls/' + req.params.roomId + '/index.m3u8',
-    flvUrl: '/live/' + req.params.roomId + '.flv',
-    websocketUrl: '/socket.io/live',
-    apiBase: '/api/v1/live-interact',
-  });
+app.get('/live-player/:roomId', async (req, res) => {
+  try {
+    const urls = await livePlayService.getPlayUrls(req.params.roomId, req.hostname);
+    res.json({
+      liveRoomId: req.params.roomId,
+      hlsUrl: urls.hls,
+      flvUrl: urls.flv,
+      webrtcUrl: urls.webrtc,
+      websocketUrl: '/socket.io/live',
+      apiBase: '/api/v1/live-interact',
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 app.post('/api/v1/live/push/auth', async (req, res) => {
@@ -277,6 +341,89 @@ app.get('/api/v1/live/active-streams', (req, res) => {
     success: true,
     data: mediaServerService.getActiveStreams(),
   });
+});
+
+app.get('/api/v1/live/health', async (req, res) => {
+  const nmsPort = config.live.flv.port;
+  let nmsHttpReachable = false;
+
+  try {
+    const options = {
+      hostname: '127.0.0.1',
+      port: nmsPort,
+      path: '/api/streams',
+      method: 'GET',
+      timeout: 3000,
+    };
+
+    const nmsReq = http.request(options, (nmsRes) => {
+      nmsHttpReachable = nmsRes.statusCode === 200;
+      let data = '';
+      nmsRes.on('data', (chunk) => { data += chunk; });
+      nmsRes.on('end', () => {
+        res.json({
+          success: true,
+          data: {
+            status: 'ok',
+            nms: {
+              running: true,
+              httpReachable: nmsHttpReachable,
+              httpPort: nmsPort,
+              streams: data ? JSON.parse(data) : null,
+            },
+            activeStreams: mediaServerService.getActiveStreams().length,
+            timestamp: new Date().toISOString(),
+          },
+        });
+      });
+    });
+
+    nmsReq.on('error', () => {
+      res.json({
+        success: true,
+        data: {
+          status: 'degraded',
+          nms: {
+            running: false,
+            httpReachable: false,
+            httpPort: nmsPort,
+            error: 'Cannot connect to NMS HTTP server',
+          },
+          activeStreams: mediaServerService.getActiveStreams().length,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    });
+
+    nmsReq.on('timeout', () => {
+      nmsReq.destroy();
+      res.json({
+        success: true,
+        data: {
+          status: 'degraded',
+          nms: {
+            running: false,
+            httpReachable: false,
+            httpPort: nmsPort,
+            error: 'Connection timeout',
+          },
+          activeStreams: mediaServerService.getActiveStreams().length,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    });
+
+    nmsReq.end();
+  } catch (error: any) {
+    res.json({
+      success: true,
+      data: {
+        status: 'error',
+        error: error.message,
+        timestamp: new Date().toISOString(),
+      },
+    });
+  }
 });
 
 app.use(errorHandler);

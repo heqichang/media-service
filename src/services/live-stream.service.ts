@@ -34,6 +34,16 @@ class LiveStreamService extends EventEmitter {
     for (const room of rooms) {
       this.streamKeyToRoom.set(room.streamKey, room.id);
     }
+    console.log('[LiveStream] Initialized stream key cache with', rooms.length, 'rooms');
+  }
+
+  updateStreamKeyCache(streamKey: string, liveRoomId: string): void {
+    this.streamKeyToRoom.set(streamKey, liveRoomId);
+    console.log('[LiveStream] Stream key cache updated for room', liveRoomId);
+  }
+
+  removeStreamKeyCache(streamKey: string): void {
+    this.streamKeyToRoom.delete(streamKey);
   }
 
   generateStreamKey(): string {
@@ -44,7 +54,19 @@ class LiveStreamService extends EventEmitter {
   }
 
   async authenticatePush(streamKey: string, pushIp: string, protocol: 'rtmp' | 'srt'): Promise<LiveStreamAuthResult> {
-    const liveRoomId = this.streamKeyToRoom.get(streamKey);
+    let liveRoomId = this.streamKeyToRoom.get(streamKey);
+
+    if (!liveRoomId) {
+      const room = await prisma.liveRoom.findUnique({
+        where: { streamKey },
+        select: { id: true },
+      });
+      if (room) {
+        liveRoomId = room.id;
+        this.streamKeyToRoom.set(streamKey, liveRoomId);
+        console.log('[LiveStream] Stream key cache refreshed from DB for room', liveRoomId);
+      }
+    }
 
     if (!liveRoomId) {
       return { allowed: false, reason: 'Invalid stream key' };

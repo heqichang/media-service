@@ -43,6 +43,7 @@ export class MediaServerService {
       },
       http: {
         port: config.live.flv.port,
+        bind: '0.0.0.0',
         mediaroot: config.live.hls.segmentDir,
         allow_origin: '*',
         api: true,
@@ -72,11 +73,14 @@ export class MediaServerService {
     this.nms = new NodeMediaServer(nmsConfig);
 
     this.nms.on('prePublish', async (session: any) => {
-      console.log('[MediaServer] prePublish:', {
+      console.log('[MediaServer] === prePublish triggered ===');
+      console.log('[MediaServer] Session info:', {
         id: session.id,
         streamPath: session.streamPath,
         streamName: session.streamName,
+        streamApp: session.streamApp,
         ip: session.ip,
+        connectTime: session.connectTime,
       });
 
       const streamKey = this.extractStreamKey(session);
@@ -86,12 +90,20 @@ export class MediaServerService {
         return;
       }
 
+      console.log('[MediaServer] Authenticating stream key:', streamKey);
+
       try {
         const authResult = await liveStreamService.authenticatePush(
           streamKey,
           session.ip || '127.0.0.1',
           'rtmp'
         );
+
+        console.log('[MediaServer] Auth result:', {
+          allowed: authResult.allowed,
+          reason: authResult.reason,
+          liveRoomId: authResult.liveRoomId,
+        });
 
         if (!authResult.allowed) {
           console.log('[MediaServer] Auth failed:', authResult.reason);
@@ -105,6 +117,11 @@ export class MediaServerService {
           session.ip || '127.0.0.1',
           'rtmp'
         );
+
+        console.log('[MediaServer] Stream registered:', {
+          streamId: streamSession.streamId,
+          isPrimary: streamSession.isPrimary,
+        });
 
         this.activeStreams.set(session.id, {
           liveRoomId: authResult.liveRoomId!,
@@ -128,10 +145,11 @@ export class MediaServerService {
             }).catch(err => console.error('[MediaServer] Error starting recording:', err));
           }
 
-          const baseHttpUrl = 'http://localhost:' + config.live.flv.port;
+          const publicHost = config.server.publicHost || 'localhost';
+          const baseHttpUrl = 'http://' + publicHost + ':' + config.server.port;
           await liveRoomService.updatePlayUrls(authResult.liveRoomId!, {
-            hls: baseHttpUrl + '/live/' + authResult.liveRoomId + '/index.m3u8',
-            flv: baseHttpUrl + '/live/' + authResult.liveRoomId + '.flv',
+            hls: baseHttpUrl + '/hls/' + streamKey + '/index.m3u8',
+            flv: baseHttpUrl + '/live/' + streamKey + '.flv',
             rtc: null,
           }).catch(err => console.error('[MediaServer] Error updating play URLs:', err));
 
@@ -146,6 +164,13 @@ export class MediaServerService {
 
     this.nms.on('postPublish', (session: any) => {
       console.log('[MediaServer] postPublish:', {
+        id: session.id,
+        streamPath: session.streamPath,
+      });
+    });
+
+    this.nms.on('donePublish', (session: any) => {
+      console.log('[MediaServer] donePublish:', {
         id: session.id,
         streamPath: session.streamPath,
       });
@@ -168,15 +193,6 @@ export class MediaServerService {
 
         this.activeStreams.delete(session.id);
       }
-    });
-
-    this.nms.on('donePublish', (session: any) => {
-      console.log('[MediaServer] donePublish:', {
-        id: session.id,
-        streamPath: session.streamPath,
-      });
-
-      this.activeStreams.delete(session.id);
     });
 
     this.nms.on('prePlay', (session: any) => {
@@ -203,12 +219,15 @@ export class MediaServerService {
 
     try {
       this.nms.run();
+      const publicHost = config.server.publicHost || 'localhost';
       console.log('[MediaServer] Node-Media-Server started successfully');
       console.log('[MediaServer] RTMP server on port', config.live.rtmp.port);
       console.log('[MediaServer] HTTP/FLV/HLS server on port', config.live.flv.port);
-      console.log('[MediaServer] RTMP Push URL: rtmp://localhost:' + config.live.rtmp.port + '/live/{streamKey}');
-      console.log('[MediaServer] HLS Play URL: http://localhost:' + config.live.flv.port + '/live/{roomId}/index.m3u8');
-      console.log('[MediaServer] FLV Play URL: http://localhost:' + config.live.flv.port + '/live/{roomId}.flv');
+      console.log('[MediaServer] RTMP Push URL: rtmp://' + publicHost + ':' + config.live.rtmp.port + '/live/{streamKey}');
+      console.log('[MediaServer] HLS Play URL (via Express): http://' + publicHost + ':' + config.server.port + '/hls/{streamKey}/index.m3u8');
+      console.log('[MediaServer] FLV Play URL (via Express): http://' + publicHost + ':' + config.server.port + '/live/{streamKey}.flv');
+      console.log('[MediaServer] HLS Play URL (direct NMS): http://' + publicHost + ':' + config.live.flv.port + '/live/{streamKey}/index.m3u8');
+      console.log('[MediaServer] FLV Play URL (direct NMS): http://' + publicHost + ':' + config.live.flv.port + '/live/{streamKey}.flv');
     } catch (error: any) {
       console.error('[MediaServer] Failed to start Node-Media-Server:', error.message);
     }
@@ -319,19 +338,23 @@ export class MediaServerService {
   }
 
   getServerStats(): any {
+    const publicHost = config.server.publicHost || 'localhost';
     return {
       rtmpPort: config.live.rtmp.port,
       httpPort: config.live.flv.port,
+      expressPort: config.server.port,
       srtPort: config.live.srt.port,
       activeStreams: this.activeStreams.size,
       hlsEnabled: config.live.hls.enabled,
       flvEnabled: config.live.flv.enabled,
       webrtcEnabled: config.live.webrtc.enabled,
       hlsSegmentDir: config.live.hls.segmentDir,
-      rtmpPushUrl: 'rtmp://localhost:' + config.live.rtmp.port + '/live/{streamKey}',
-      srtPushUrl: 'srt://localhost:' + config.live.srt.port + '?streamid={streamKey}&pkt_size=1316',
-      hlsPlayUrl: 'http://localhost:' + config.live.flv.port + '/live/{roomId}/index.m3u8',
-      flvPlayUrl: 'http://localhost:' + config.live.flv.port + '/live/{roomId}.flv',
+      rtmpPushUrl: 'rtmp://' + publicHost + ':' + config.live.rtmp.port + '/live/{streamKey}',
+      srtPushUrl: 'srt://' + publicHost + ':' + config.live.srt.port + '?streamid={streamKey}&pkt_size=1316',
+      hlsPlayUrl: 'http://' + publicHost + ':' + config.server.port + '/hls/{streamKey}/index.m3u8',
+      flvPlayUrl: 'http://' + publicHost + ':' + config.server.port + '/live/{streamKey}.flv',
+      hlsPlayUrlDirect: 'http://' + publicHost + ':' + config.live.flv.port + '/live/{streamKey}/index.m3u8',
+      flvPlayUrlDirect: 'http://' + publicHost + ':' + config.live.flv.port + '/live/{streamKey}.flv',
       webrtcPlayUrl: '/webrtc/{roomId} (via WebSocket signaling)',
       nmsRunning: this.nms !== null,
       srtRunning: this.srtProcess !== null,
