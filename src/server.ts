@@ -153,6 +153,15 @@ app.get('/player/:videoId', (req, res) => {
   }
 });
 
+app.get('/live/:roomId', (req, res) => {
+  const livePath = path.join(__dirname, '..', 'public', 'live.html');
+  if (fs.existsSync(livePath)) {
+    res.sendFile(livePath);
+  } else {
+    res.status(404).json({ error: 'Live page not found' });
+  }
+});
+
 app.get('/live-player/:roomId', async (req, res) => {
   try {
     const urls = await livePlayService.getPlayUrls(req.params.roomId, req.hostname);
