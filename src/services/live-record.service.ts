@@ -99,7 +99,26 @@ class LiveRecordService extends EventEmitter {
     const recordingId = uuidv4();
     const fileName = `${liveRoomId}_${Date.now()}`;
     const fileExt = format.toLowerCase() === 'hls' ? 'm3u8' : format.toLowerCase();
-    const filePath = path.join(config.live.record.outputDir, `${fileName}.${fileExt}`);
+
+    this.ensureOutputDir();
+
+    let filePath: string;
+    if (format === 'HLS') {
+      const hlsSubDir = path.join(config.live.record.outputDir, recordingId);
+      if (!fs.existsSync(hlsSubDir)) {
+        fs.mkdirSync(hlsSubDir, { recursive: true });
+      }
+      filePath = path.join(hlsSubDir, `index.${fileExt}`);
+    } else {
+      filePath = path.join(config.live.record.outputDir, `${fileName}.${fileExt}`);
+    }
+
+    console.log('[LiveRecord] Recording config:', {
+      liveRoomId,
+      format,
+      filePath,
+      streamKey: room.streamKey,
+    });
 
     const recording = await prisma.liveRecording.create({
       data: {
@@ -136,27 +155,76 @@ class LiveRecordService extends EventEmitter {
       liveRoomId,
       format,
       filePath,
+      ffmpegPath: config.ffmpeg.ffmpegPath,
+      args: ffmpegArgs.join(' '),
     });
 
     try {
-      const proc = spawn(config.ffmpeg.ffmpegPath, ffmpegArgs, {
-        stdio: 'pipe',
-        shell: false,
-      });
+      let proc: any = null;
+      let attempts = 0;
+      const maxAttempts = 5;
 
+      while (attempts < maxAttempts && !proc) {
+        try {
+          proc = spawn(config.ffmpeg.ffmpegPath, ffmpegArgs, {
+            stdio: 'pipe',
+            shell: false,
+          });
+
+          await new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              reject(new Error('FFmpeg spawn timeout'));
+            }, 3000);
+
+            proc!.on('spawn', () => {
+              clearTimeout(timeout);
+              console.log(`[LiveRecord] FFmpeg process spawned successfully for ${liveRoomId}`);
+              resolve();
+            });
+
+            proc!.on('error', (err: Error) => {
+              clearTimeout(timeout);
+              reject(err);
+            });
+          });
+        } catch (err: any) {
+          attempts++;
+          console.warn(`[LiveRecord] FFmpeg spawn attempt ${attempts}/${maxAttempts} failed: ${err.message}`);
+          if (proc) {
+            try { proc.kill('SIGKILL'); } catch {}
+            proc = null;
+          }
+          if (attempts < maxAttempts) {
+            console.log(`[LiveRecord] Retrying in ${attempts * 1000}ms...`);
+            await new Promise(r => setTimeout(r, attempts * 1000));
+          }
+        }
+      }
+
+      if (!proc) {
+        throw new Error(`Failed to start FFmpeg after ${maxAttempts} attempts`);
+      }
+
+      let stderrBuffer = '';
       if (proc.stderr) {
         proc.stderr.on('data', (data: Buffer) => {
-          const lines = data.toString().split('\n').filter(Boolean);
+          const output = data.toString();
+          stderrBuffer += output;
+          const lines = output.split('\n').filter(Boolean);
           for (const line of lines) {
             if (line.includes('error') || line.includes('Error')) {
-              console.error(`[LiveRecord][${liveRoomId}]`, line);
+              console.error(`[LiveRecord][${liveRoomId}] FFmpeg stderr:`, line);
             }
           }
         });
       }
 
+      if (proc.stdout) {
+        proc.stdout.on('data', () => {});
+      }
+
       proc.on('error', (err: Error) => {
-        console.error(`[LiveRecord] FFmpeg error for ${liveRoomId}:`, err.message);
+        console.error(`[LiveRecord] FFmpeg process error for ${liveRoomId}:`, err.message);
         session.status = 'failed';
         prisma.liveRecording.update({
           where: { id: recording.id },
@@ -166,14 +234,25 @@ class LiveRecordService extends EventEmitter {
 
       proc.on('exit', (code: number) => {
         console.log(`[LiveRecord] FFmpeg exited with code ${code} for ${liveRoomId}`);
+        if (code !== 0) {
+          console.error(`[LiveRecord] FFmpeg stderr tail:`, stderrBuffer.slice(-1000));
+        }
         if (session.status === 'recording') {
           session.status = 'stopped';
+          let fileSize: bigint | undefined;
+          try {
+            if (fs.existsSync(filePath)) {
+              const stats = fs.statSync(filePath);
+              fileSize = BigInt(stats.size);
+            }
+          } catch {}
           prisma.liveRecording.update({
             where: { id: recording.id },
             data: {
               status: code === 0 ? 'COMPLETED' : 'STOPPED',
               stoppedAt: new Date(),
               duration: Math.floor((Date.now() - session.startedAt.getTime()) / 1000),
+              fileSize,
             },
           }).catch(console.error);
         }
@@ -182,22 +261,32 @@ class LiveRecordService extends EventEmitter {
 
       session.process = proc;
       this.ffmpegProcesses.set(recording.id, proc);
+
+      setTimeout(() => {
+        if (proc.pid && fs.existsSync(filePath)) {
+          try {
+            const stats = fs.statSync(filePath);
+            console.log(`[LiveRecord] FFmpeg running, file size: ${stats.size} bytes`);
+          } catch {}
+        }
+      }, 5000);
+
+      if (sliceDuration && sliceDuration > 0) {
+        this.setupSliceTimer(liveRoomId, recording.id, sliceDuration, format);
+      }
+
+      this.emit('record:start', session);
+
+      return session;
     } catch (error: any) {
-      console.error('[LiveRecord] Failed to start FFmpeg:', error.message);
+      console.error('[LiveRecord] Failed to start FFmpeg recording:', error.message);
       session.status = 'failed';
       await prisma.liveRecording.update({
         where: { id: recording.id },
         data: { status: 'FAILED' },
       });
+      throw error;
     }
-
-    if (sliceDuration && sliceDuration > 0) {
-      this.setupSliceTimer(liveRoomId, recording.id, sliceDuration, format);
-    }
-
-    this.emit('record:start', session);
-
-    return session;
   }
 
   private setupSliceTimer(
@@ -280,15 +369,22 @@ class LiveRecordService extends EventEmitter {
           shell: false,
         });
 
+        let stderrBuffer = '';
         if (proc.stderr) {
           proc.stderr.on('data', (data: Buffer) => {
-            const lines = data.toString().split('\n').filter(Boolean);
+            const output = data.toString();
+            stderrBuffer += output;
+            const lines = output.split('\n').filter(Boolean);
             for (const line of lines) {
               if (line.includes('error') || line.includes('Error')) {
                 console.error(`[LiveRecord][${liveRoomId}]`, line);
               }
             }
           });
+        }
+
+        if (proc.stdout) {
+          proc.stdout.on('data', () => {});
         }
 
         proc.on('error', (err: Error) => {
@@ -298,14 +394,25 @@ class LiveRecordService extends EventEmitter {
 
         proc.on('exit', (code: number) => {
           console.log(`[LiveRecord] FFmpeg slice exited with code ${code} for ${liveRoomId}`);
+          if (code !== 0) {
+            console.error(`[LiveRecord] FFmpeg slice stderr tail:`, stderrBuffer.slice(-1000));
+          }
           if (newSession.status === 'recording') {
             newSession.status = 'stopped';
+            let fileSize: bigint | undefined;
+            try {
+              if (fs.existsSync(newFilePath)) {
+                const stats = fs.statSync(newFilePath);
+                fileSize = BigInt(stats.size);
+              }
+            } catch {}
             prisma.liveRecording.update({
               where: { id: newRecording.id },
               data: {
                 status: code === 0 ? 'COMPLETED' : 'STOPPED',
                 stoppedAt: new Date(),
                 duration: Math.floor((Date.now() - newSession.startedAt.getTime()) / 1000),
+                fileSize,
               },
             }).catch(console.error);
           }
