@@ -38,6 +38,16 @@ export const config = {
     concurrency: parseInt(process.env.TRANSCODE_CONCURRENCY || '2', 10),
     maxRetries: parseInt(process.env.TRANSCODE_MAX_RETRIES || '3', 10),
   },
+  videoEdit: {
+    outputDir: path.resolve(process.env.VIDEO_EDIT_OUTPUT_DIR || './uploads/edits'),
+    tempDir: path.resolve(process.env.VIDEO_EDIT_TEMP_DIR || './uploads/edits/temp'),
+    exportConcurrency: parseInt(process.env.VIDEO_EDIT_EXPORT_CONCURRENCY || '1', 10),
+    maxHistorySize: parseInt(process.env.VIDEO_EDIT_MAX_HISTORY || '50', 10),
+    defaultWidth: parseInt(process.env.VIDEO_EDIT_DEFAULT_WIDTH || '1920', 10),
+    defaultHeight: parseInt(process.env.VIDEO_EDIT_DEFAULT_HEIGHT || '1080', 10),
+    defaultFps: parseInt(process.env.VIDEO_EDIT_DEFAULT_FPS || '30', 10),
+    defaultTransitionDuration: parseFloat(process.env.VIDEO_EDIT_DEFAULT_TRANSITION || '0.5'),
+  },
   live: {
     rtmp: {
       port: parseInt(process.env.RTMP_PORT || '1935', 10),

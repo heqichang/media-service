@@ -53,6 +53,7 @@ app.use('/static', express.static(path.join(__dirname, '..', 'public')));
 app.use('/uploads', express.static(config.upload.tempDir));
 app.use('/hls', express.static(config.live.hls.segmentDir));
 app.use('/recordings', express.static(config.live.record.outputDir));
+app.use('/edits', express.static(config.videoEdit.outputDir));
 
 app.use('/api/v1', routes);
 
@@ -128,6 +129,7 @@ app.get('/', (req, res) => {
       storage: '/api/v1/storage',
       liveRooms: '/api/v1/live-rooms',
       liveInteract: '/api/v1/live-interact',
+      videoEdit: '/api/v1/video-edit',
       health: '/api/v1/health',
       socket: '/socket.io',
     },
@@ -143,6 +145,16 @@ app.get('/', (req, res) => {
 
 app.use('/admin', express.static(path.join(__dirname, '..', 'public', 'admin.html')));
 app.use('/player', express.static(path.join(__dirname, '..', 'public', 'player.html')));
+app.use('/editor', express.static(path.join(__dirname, '..', 'public', 'editor.html')));
+
+app.get('/editor/:projectId?', (req, res) => {
+  const editorPath = path.join(__dirname, '..', 'public', 'editor.html');
+  if (fs.existsSync(editorPath)) {
+    res.sendFile(editorPath);
+  } else {
+    res.status(404).json({ error: 'Editor page not found' });
+  }
+});
 
 app.get('/player/:videoId', (req, res) => {
   const playerPath = path.join(__dirname, '..', 'public', 'player.html');
@@ -453,6 +465,16 @@ async function startServer() {
       fs.mkdirSync(config.live.record.outputDir, { recursive: true });
     }
     console.log('Recording output directory ready');
+
+    if (!fs.existsSync(config.videoEdit.outputDir)) {
+      fs.mkdirSync(config.videoEdit.outputDir, { recursive: true });
+    }
+    console.log('Video edit output directory ready');
+
+    if (!fs.existsSync(config.videoEdit.tempDir)) {
+      fs.mkdirSync(config.videoEdit.tempDir, { recursive: true });
+    }
+    console.log('Video edit temp directory ready');
 
     await mediaServerService.start();
 

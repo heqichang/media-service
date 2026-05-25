@@ -110,6 +110,203 @@ enum PlayAuthStatus {
   EXPIRED
 }
 
+enum TrackType {
+  VIDEO
+  AUDIO
+  SUBTITLE
+}
+
+enum EffectType {
+  TRANSITION
+  FILTER
+  TEXT
+  PIP
+  SPEED
+  AUDIO
+}
+
+enum TransitionType {
+  FADE
+  DISSOLVE
+  SLIDE_LEFT
+  SLIDE_RIGHT
+  SLIDE_UP
+  SLIDE_DOWN
+  WIPE
+  CROSSFADE
+}
+
+enum FilterType {
+  BRIGHTNESS
+  CONTRAST
+  SATURATION
+  GRAYSCALE
+  SEPIA
+  BLUR
+  SHARPEN
+  VINTAGE
+  CINEMATIC
+  WARM
+  COOL
+  NEGATE
+  HUE_ROTATE
+}
+
+enum TextOverlayType {
+  TITLE
+  WATERMARK
+  SUBTITLE
+  CAPTION
+}
+
+enum ExportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model VideoEditProject {
+  id          String    @id @default(uuid())
+  title       String
+  description String?
+  videoId     String?
+  video       Video?    @relation(fields: [videoId], references: [id])
+  userId      String?
+  timeline    Timeline?
+  exportJobs  ExportJob[]
+  history     EditHistory[]
+  thumbnailUrl String?
+  duration    Float     @default(0)
+  width       Int       @default(1920)
+  height      Int       @default(1080)
+  fps         Int       @default(30)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([videoId])
+  @@index([createdAt])
+}
+
+model Timeline {
+  id         String   @id @default(uuid())
+  projectId  String   @unique
+  project    VideoEditProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tracks     Track[]
+  duration   Float    @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Track {
+  id         String   @id @default(uuid())
+  timelineId String
+  timeline   Timeline @relation(fields: [timelineId], references: [id], onDelete: Cascade)
+  type       TrackType
+  name       String
+  index      Int
+  locked     Boolean  @default(false)
+  muted      Boolean  @default(false)
+  visible    Boolean  @default(true)
+  volume     Float    @default(1)
+  clips      Clip[]
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([timelineId, type])
+}
+
+model Clip {
+  id         String   @id @default(uuid())
+  trackId    String
+  track      Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  sourcePath String
+  sourceType String   @default("video")
+  startTime  Float    @default(0)
+  endTime    Float    @default(0)
+  sourceIn   Float    @default(0)
+  sourceOut  Float    @default(0)
+  duration   Float    @default(0)
+  name       String?
+  effects    Effect[]
+  speed      Float    @default(1)
+  volume     Float    @default(1)
+  rotation   Float    @default(0)
+  scale      Float    @default(1)
+  positionX  Float    @default(0)
+  positionY  Float    @default(0)
+  opacity    Float    @default(1)
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([trackId])
+}
+
+model Effect {
+  id             String       @id @default(uuid())
+  clipId         String
+  clip           Clip         @relation(fields: [clipId], references: [id], onDelete: Cascade)
+  type           EffectType
+  subtype        String?
+  name           String?
+  startTime      Float        @default(0)
+  endTime        Float?
+  duration       Float?
+  parameters     Json
+  transitionType TransitionType?
+  filterType     FilterType?
+  textType       TextOverlayType?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([clipId, type])
+}
+
+model ExportJob {
+  id          String       @id @default(uuid())
+  projectId   String
+  project     VideoEditProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  status      ExportStatus @default(PENDING)
+  progress    Int          @default(0)
+  outputPath  String?
+  outputUrl   String?
+  fileSize    BigInt?
+  format      String       @default("mp4")
+  videoCodec  String       @default("h264")
+  audioCodec  String       @default("aac")
+  width       Int          @default(1920)
+  height      Int          @default(1080)
+  bitrate     Int?
+  fps         Int          @default(30)
+  quality     String?
+  errorMessage String?
+  startedAt   DateTime?
+  completedAt DateTime?
+  cancelledAt DateTime?
+  metadata    Json?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([projectId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model EditHistory {
+  id         String   @id @default(uuid())
+  projectId  String
+  project    VideoEditProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  action     String
+  snapshot   Json
+  timestamp  DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([projectId, timestamp])
+}
+
 model Video {
   id             String          @id @default(uuid())
   title          String
@@ -133,6 +330,7 @@ model Video {
   thumbnails     Thumbnail[]
   playlists      Playlist[]
   liveRecordings LiveRecording[]
+  editProjects   VideoEditProject[]
   metadata       Json?
   views          Int             @default(0)
   isPublic       Boolean         @default(true)

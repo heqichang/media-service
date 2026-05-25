@@ -1,6 +1,6 @@
 import Queue from 'bull';
 import { config } from '../config';
-import { TranscodeJobData, ThumbnailJobData } from '../types';
+import { TranscodeJobData, ThumbnailJobData, ExportJobData } from '../types';
 
 export const transcodeQueue = new Queue<TranscodeJobData>('transcode', {
   redis: config.redis.url,
@@ -32,6 +32,19 @@ export const thumbnailQueue = new Queue<ThumbnailJobData>('thumbnail', {
   },
 });
 
+export const exportQueue = new Queue<{ exportJobId: string }>('video-export', {
+  redis: config.redis.url,
+  defaultJobOptions: {
+    attempts: 1,
+    removeOnComplete: true,
+    removeOnFail: false,
+  },
+  settings: {
+    maxStalledCount: 1,
+    stalledInterval: 60000,
+  },
+});
+
 export const notificationQueue = new Queue<any>('notification', {
   redis: config.redis.url,
   defaultJobOptions: {
@@ -59,4 +72,16 @@ thumbnailQueue.on('global:completed', (jobId, result) => {
 
 thumbnailQueue.on('global:failed', (jobId, err) => {
   console.error(`Thumbnail job ${jobId} failed:`, err);
+});
+
+exportQueue.on('global:completed', (jobId, result) => {
+  console.log(`Export job ${jobId} completed`);
+});
+
+exportQueue.on('global:failed', (jobId, err) => {
+  console.error(`Export job ${jobId} failed:`, err);
+});
+
+exportQueue.on('global:progress', (jobId, progress) => {
+  console.log(`Export job ${jobId} progress: ${progress}%`);
 });

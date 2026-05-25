@@ -178,3 +178,151 @@ export interface PlayAuthResult {
   expiresAt?: Date;
   reason?: string;
 }
+
+export interface CreateProjectRequest {
+  title: string;
+  description?: string;
+  videoId?: string;
+  width?: number;
+  height?: number;
+  fps?: number;
+}
+
+export interface UpdateProjectRequest {
+  title?: string;
+  description?: string;
+  thumbnailUrl?: string;
+  width?: number;
+  height?: number;
+  fps?: number;
+}
+
+export interface TrackData {
+  type: 'VIDEO' | 'AUDIO' | 'SUBTITLE';
+  name: string;
+  index: number;
+  locked?: boolean;
+  muted?: boolean;
+  visible?: boolean;
+  volume?: number;
+}
+
+export interface ClipData {
+  sourcePath: string;
+  sourceType?: string;
+  startTime: number;
+  endTime: number;
+  sourceIn: number;
+  sourceOut: number;
+  name?: string;
+  speed?: number;
+  volume?: number;
+  rotation?: number;
+  scale?: number;
+  positionX?: number;
+  positionY?: number;
+  opacity?: number;
+}
+
+export interface SplitClipRequest {
+  time: number;
+}
+
+export interface EffectData {
+  type: 'TRANSITION' | 'FILTER' | 'TEXT' | 'PIP' | 'SPEED' | 'AUDIO';
+  subtype?: string;
+  name?: string;
+  startTime: number;
+  endTime?: number;
+  duration?: number;
+  parameters: Record<string, any>;
+  transitionType?: string;
+  filterType?: string;
+  textType?: string;
+}
+
+export interface TransitionParameters {
+  duration: number;
+  offset?: number;
+}
+
+export interface FilterParameters {
+  intensity?: number;
+  brightness?: number;
+  contrast?: number;
+  saturation?: number;
+  blur?: number;
+}
+
+export interface TextParameters {
+  text: string;
+  fontSize?: number;
+  fontColor?: string;
+  fontFamily?: string;
+  positionX?: number;
+  positionY?: number;
+  backgroundColor?: string;
+  borderColor?: string;
+  borderWidth?: number;
+  shadow?: boolean;
+  shadowColor?: string;
+  shadowX?: number;
+  shadowY?: number;
+  animation?: string;
+}
+
+export interface PipParameters {
+  sourcePath: string;
+  positionX: number;
+  positionY: number;
+  width: number;
+  height: number;
+  opacity?: number;
+  border?: boolean;
+  borderColor?: string;
+  borderWidth?: number;
+  borderRadius?: number;
+}
+
+export interface SpeedParameters {
+  speed: number;
+  pitch?: boolean;
+}
+
+export interface AudioParameters {
+  volume?: number;
+  fadeIn?: number;
+  fadeOut?: number;
+  noiseReduction?: boolean;
+  noiseThreshold?: number;
+}
+
+export interface ExportRequest {
+  format?: 'mp4' | 'mov' | 'avi' | 'mkv' | 'webm' | 'gif';
+  videoCodec?: 'h264' | 'h265' | 'av1' | 'vp9';
+  audioCodec?: 'aac' | 'mp3' | 'opus' | 'copy';
+  width?: number;
+  height?: number;
+  bitrate?: number;
+  fps?: number;
+  quality?: 'low' | 'medium' | 'high' | 'ultra';
+}
+
+export interface ExportJobData {
+  projectId: string;
+  timeline: any;
+  exportOptions: ExportRequest;
+  outputDir: string;
+}
+
+export interface TimelineSnapshot {
+  tracks: any[];
+  duration: number;
+}
+
+export interface HistoryEntry {
+  id: string;
+  action: string;
+  snapshot: TimelineSnapshot;
+  timestamp: Date;
+}

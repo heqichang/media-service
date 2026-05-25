@@ -6,6 +6,7 @@ import categoryRoutes from './category.routes';
 import storageRoutes from './storage.routes';
 import liveRoomRoutes from './live-room.routes';
 import liveInteractRoutes from './live-interact.routes';
+import videoEditRoutes from './video-edit.routes';
 
 const router = Router();
 
@@ -16,6 +17,7 @@ router.use('/', categoryRoutes);
 router.use('/storage', storageRoutes);
 router.use('/live-rooms', liveRoomRoutes);
 router.use('/live-interact', liveInteractRoutes);
+router.use('/video-edit', videoEditRoutes);
 
 router.get('/health', (req, res) => {
   res.json({

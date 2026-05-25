@@ -1,5 +1,6 @@
-import { transcodeQueue, thumbnailQueue } from './index';
+import { transcodeQueue, thumbnailQueue, exportQueue } from './index';
 import { FFmpegService } from '../services/ffmpeg.service';
+import { exportService } from '../services/export.service';
 import prisma from '../config/prisma';
 import { TranscodeStatus, VideoStatus } from '@prisma/client';
 import { storageService } from '../services/storage.service';
@@ -202,6 +203,54 @@ thumbnailQueue.process(5, async (job) => {
     }
   } catch (error: any) {
     console.error('Thumbnail generation failed:', error);
+    throw error;
+  }
+});
+
+exportQueue.process(config.videoEdit.exportConcurrency, async (job) => {
+  const { exportJobId } = job.data;
+
+  console.log(`[Export] Starting export job: ${exportJobId}`);
+
+  try {
+    job.progress(0);
+
+    const outputPath = await exportService.startExport(exportJobId, (progress) => {
+      job.progress(Math.min(progress, 99));
+    });
+
+    const jobData = await prisma.exportJob.findUnique({
+      where: { id: exportJobId },
+    });
+
+    if (jobData?.outputPath && fs.existsSync(jobData.outputPath)) {
+      const fileName = path.basename(jobData.outputPath);
+      const objectName = `edits/${jobData.projectId}/${fileName}`;
+      await storageService.uploadVideo(objectName, jobData.outputPath);
+
+      const outputUrl = `/uploads/edits/${fileName}`;
+      await prisma.exportJob.update({
+        where: { id: exportJobId },
+        data: { outputUrl },
+      });
+    }
+
+    job.progress(100);
+    console.log(`[Export] Completed export job: ${exportJobId}`);
+
+    return { success: true, exportJobId, outputPath };
+  } catch (error: any) {
+    console.error(`[Export] Export job ${exportJobId} failed:`, error.message);
+    
+    await prisma.exportJob.update({
+      where: { id: exportJobId },
+      data: {
+        status: 'FAILED',
+        errorMessage: error.message,
+        completedAt: new Date(),
+      },
+    }).catch(() => {});
+
     throw error;
   }
 });
