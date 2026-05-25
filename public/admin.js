@@ -1299,7 +1299,7 @@
         try {
             const res = await api.get('/live-rooms/' + id + '/stream-config');
             const d = res.data || {};
-            const rtmpBase = d.pushUrl ? d.pushUrl.substring(0, d.pushUrl.lastIndexOf('/')) : '';
+            const rtmpServerUrl = d.pushUrl || (d.host && d.rtmpPort ? `rtmp://${d.host}:${d.rtmpPort}/live` : '');
             const html = `
                 <div style="padding:10px 0;">
                     <div class="form-row" style="margin-bottom:12px;">
@@ -1312,15 +1312,15 @@
                     <div class="form-row" style="margin-bottom:12px;">
                         <label class="form-label">RTMP 推流地址</label>
                         <div style="display:flex;gap:8px;">
-                            <input class="input" value="${escapeAttr(d.pushUrl || '')}" readonly>
+                            <input class="input" value="${escapeAttr(rtmpServerUrl)}" readonly>
                             <button class="btn btn-ghost" onclick="navigator.clipboard.writeText(this.previousElementSibling.value)">复制</button>
                         </div>
                     </div>
                     <div style="font-size:12px;color:var(--text-muted);margin-top:16px;padding:10px;background:var(--bg-secondary);border-radius:6px;">
                         <strong>推流说明：</strong><br>
                         1. 使用 OBS 或其他推流软件<br>
-                        2. 服务器地址: <code>${escapeHtml(rtmpBase)}</code><br>
-                        3. 密钥: 上面的推流密钥<br>
+                        2. 服务器地址: <code>${escapeHtml(rtmpServerUrl)}</code><br>
+                        3. 串流密钥: 上面的推流密钥<br>
                         4. 推流开始后直播间状态将自动变为"直播中"
                     </div>
                     <div style="margin-top:16px;">

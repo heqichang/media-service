@@ -161,7 +161,7 @@ export class LiveRoomController {
       }
 
       const host = config.server.publicHost || req.hostname || 'localhost';
-      const pushUrl = `rtmp://${host}:${config.live.rtmp.port}/live/${room.streamKey}`;
+      const pushUrl = `rtmp://${host}:${config.live.rtmp.port}/live`;
       const playUrls = await livePlayService.getPlayUrls(id, host);
 
       successResponse(res, {

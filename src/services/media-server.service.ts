@@ -74,18 +74,11 @@ export class MediaServerService {
 
       const streamKey = this.extractStreamKey(session);
       if (!streamKey) {
-        console.log('[MediaServer] No stream key found, closing session');
-        session.close();
+        console.log('[MediaServer] No stream key found, will close after postPublish');
         return;
       }
 
-      if (!liveStreamService.isStreamKeyKnown(streamKey)) {
-        console.log('[MediaServer] Unknown stream key, closing session:', streamKey);
-        session.close();
-        return;
-      }
-
-      console.log('[MediaServer] Stream key accepted (sync check), starting async setup:', streamKey);
+      console.log('[MediaServer] Stream key detected, starting async setup:', streamKey);
 
       this.handleStreamPublish(session, streamKey).catch(err => {
         console.error('[MediaServer] Async stream setup failed:', err.message);
@@ -155,7 +148,8 @@ export class MediaServerService {
       console.log('[MediaServer] Node-Media-Server started successfully');
       console.log('[MediaServer] RTMP server on port', config.live.rtmp.port);
       console.log('[MediaServer] HTTP/FLV server on port', config.live.flv.port);
-      console.log('[MediaServer] RTMP Push URL: rtmp://' + publicHost + ':' + config.live.rtmp.port + '/live/{streamKey}');
+      console.log('[MediaServer] RTMP Server URL: rtmp://' + publicHost + ':' + config.live.rtmp.port + '/live');
+      console.log('[MediaServer] RTMP Stream Key: {streamKey}');
       console.log('[MediaServer] FLV Play URL: http://' + publicHost + ':' + config.server.port + '/live/{streamKey}.flv');
       console.log('[MediaServer] HLS Play URL: http://' + publicHost + ':' + config.server.port + '/hls/{streamKey}/index.m3u8');
     } catch (error: any) {
@@ -178,8 +172,7 @@ export class MediaServerService {
       });
 
       if (!authResult.allowed) {
-        console.log('[MediaServer] Auth failed:', authResult.reason);
-        session.close();
+        console.log('[MediaServer] Auth failed, stream will not be registered:', authResult.reason);
         return;
       }
 
@@ -240,7 +233,7 @@ export class MediaServerService {
       return;
     }
 
-    const hlsDir = config.live.hls.segmentDir + '/live/' + streamKey;
+    const hlsDir = config.live.hls.segmentDir + '/' + streamKey;
     const fs = require('fs');
     fs.mkdirSync(hlsDir, { recursive: true });
 
@@ -410,7 +403,8 @@ export class MediaServerService {
       flvEnabled: config.live.flv.enabled,
       webrtcEnabled: config.live.webrtc.enabled,
       hlsSegmentDir: config.live.hls.segmentDir,
-      rtmpPushUrl: 'rtmp://' + publicHost + ':' + config.live.rtmp.port + '/live/{streamKey}',
+      rtmpPushUrl: 'rtmp://' + publicHost + ':' + config.live.rtmp.port + '/live',
+      rtmpStreamKey: '{streamKey}',
       srtPushUrl: 'srt://' + publicHost + ':' + config.live.srt.port + '?streamid={streamKey}&pkt_size=1316',
       hlsPlayUrl: 'http://' + publicHost + ':' + config.server.port + '/hls/{streamKey}/index.m3u8',
       flvPlayUrl: 'http://' + publicHost + ':' + config.server.port + '/live/{streamKey}.flv',
