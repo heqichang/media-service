@@ -63,9 +63,11 @@ class LiveRecordService extends EventEmitter {
         '-i', inputUrl,
         '-c:v', 'libx264',
         '-preset', 'veryfast',
+        '-tune', 'zerolatency',
         '-c:a', 'aac',
         '-f', 'mp4',
-        '-movflags', '+faststart',
+        '-movflags', '+frag_keyframe+empty_moov+default_base_moof',
+        '-frag_duration', '1000000',
         outputPath,
       ];
     }
@@ -74,6 +76,7 @@ class LiveRecordService extends EventEmitter {
       '-i', inputUrl,
       '-c', 'copy',
       '-f', formatLower,
+      '-flvflags', 'no_duration_filesize',
       outputPath,
     ];
   }
@@ -165,6 +168,14 @@ class LiveRecordService extends EventEmitter {
         console.log(`[LiveRecord] FFmpeg exited with code ${code} for ${liveRoomId}`);
         if (session.status === 'recording') {
           session.status = 'stopped';
+          prisma.liveRecording.update({
+            where: { id: recording.id },
+            data: {
+              status: code === 0 ? 'COMPLETED' : 'STOPPED',
+              stoppedAt: new Date(),
+              duration: Math.floor((Date.now() - session.startedAt.getTime()) / 1000),
+            },
+          }).catch(console.error);
         }
         this.ffmpegProcesses.delete(recording.id);
       });
@@ -289,6 +300,14 @@ class LiveRecordService extends EventEmitter {
           console.log(`[LiveRecord] FFmpeg slice exited with code ${code} for ${liveRoomId}`);
           if (newSession.status === 'recording') {
             newSession.status = 'stopped';
+            prisma.liveRecording.update({
+              where: { id: newRecording.id },
+              data: {
+                status: code === 0 ? 'COMPLETED' : 'STOPPED',
+                stoppedAt: new Date(),
+                duration: Math.floor((Date.now() - newSession.startedAt.getTime()) / 1000),
+              },
+            }).catch(console.error);
           }
           this.ffmpegProcesses.delete(newRecording.id);
         });

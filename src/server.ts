@@ -203,15 +203,6 @@ app.post('/api/v1/live/push/start', async (req, res) => {
       metrics
     );
 
-    if (session.isPrimary) {
-      const room = await prisma.liveRoom.findUnique({ where: { id: liveRoomId } });
-      if (room && room.isRecorded) {
-        await liveRecordService.startRecording(liveRoomId, {
-          format: (room.recordFormat || 'FLV').toLowerCase() as any,
-        });
-      }
-    }
-
     res.json({ success: true, data: session });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });

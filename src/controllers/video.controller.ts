@@ -213,7 +213,14 @@ export class VideoController {
         return errorResponse(res, 'Video not found', 404);
       }
 
-      const filePath = path.join(config.upload.tempDir, video.uploadId || '', video.fileName);
+      let filePath: string;
+      if (video.uploadId) {
+        filePath = path.join(config.upload.tempDir, video.uploadId, video.fileName);
+      } else if (video.originalPath) {
+        filePath = video.originalPath;
+      } else {
+        return errorResponse(res, 'Video file path not found', 400);
+      }
 
       const metadata = await FFmpegService.getMetadata(filePath);
 
@@ -250,7 +257,15 @@ export class VideoController {
         return errorResponse(res, 'Video is not ready for transcoding', 400);
       }
 
-      const inputPath = path.join(config.upload.tempDir, video.uploadId || '', video.fileName);
+      let inputPath: string;
+      if (video.uploadId) {
+        inputPath = path.join(config.upload.tempDir, video.uploadId, video.fileName);
+      } else if (video.originalPath) {
+        inputPath = video.originalPath;
+      } else {
+        return errorResponse(res, 'Video input path not found', 400);
+      }
+
       const outputDir = path.join(config.upload.tempDir, video.id, 'transcoded');
 
       if (isABR) {
@@ -366,7 +381,15 @@ export class VideoController {
         return errorResponse(res, 'Video not found', 404);
       }
 
-      const inputPath = path.join(config.upload.tempDir, video.uploadId || '', video.fileName);
+      let inputPath: string;
+      if (video.uploadId) {
+        inputPath = path.join(config.upload.tempDir, video.uploadId, video.fileName);
+      } else if (video.originalPath) {
+        inputPath = video.originalPath;
+      } else {
+        return errorResponse(res, 'Video input path not found', 400);
+      }
+
       const outputDir = path.join(config.upload.tempDir, video.id, 'thumbnails');
 
       const job = await thumbnailQueue.add({

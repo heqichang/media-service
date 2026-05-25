@@ -97,14 +97,17 @@ class LiveTranscodeService extends EventEmitter {
     outputDir: string,
     outputId: string
   ): string[] {
+    const videoBrKbps = Math.round((transcodeConfig.videoBitrate || 800000) / 1000);
+    const audioBrKbps = Math.round((transcodeConfig.audioBitrate || 96000) / 1000);
+
     const args: string[] = [
       '-i', inputUrl,
       '-c:v', transcodeConfig.videoCodec === 'h264' ? 'libx264' : transcodeConfig.videoCodec === 'h265' ? 'libx265' : 'libx264',
       '-preset', 'veryfast',
       '-tune', 'zerolatency',
-      '-b:v', `${transcodeConfig.videoBitrate}k`,
-      '-maxrate', `${transcodeConfig.videoBitrate * 1.2}k`,
-      '-bufsize', `${transcodeConfig.videoBitrate * 2}k`,
+      '-b:v', `${videoBrKbps}k`,
+      '-maxrate', `${Math.round(videoBrKbps * 1.2)}k`,
+      '-bufsize', `${Math.round(videoBrKbps * 2)}k`,
     ];
 
     if (transcodeConfig.width && transcodeConfig.height) {
@@ -117,7 +120,7 @@ class LiveTranscodeService extends EventEmitter {
 
     args.push(
       '-c:a', transcodeConfig.audioCodec === 'aac' ? 'aac' : 'libmp3lame',
-      '-b:a', `${transcodeConfig.audioBitrate || 128}k`,
+      '-b:a', `${audioBrKbps}k`,
       '-ar', '44100',
       '-ac', '2',
     );
@@ -217,14 +220,21 @@ class LiveTranscodeService extends EventEmitter {
         session.status = 'failed';
         prisma.liveTranscode.update({
           where: { id: transcode.id },
-          data: { status: 'FAILED', errorMessage: err.message },
+          data: { status: 'FAILED' },
         }).catch(console.error);
       });
 
       proc.on('exit', (code: number) => {
         console.log(`[LiveTranscode] FFmpeg exited with code ${code} for ${transcodeConfig.name}`);
         if (session.status === 'running') {
-          session.status = 'stopped';
+          session.status = code === 0 ? 'stopped' : 'failed';
+          prisma.liveTranscode.update({
+            where: { id: transcode.id },
+            data: {
+              status: code === 0 ? 'STOPPED' : 'FAILED',
+              stoppedAt: new Date(),
+            },
+          }).catch(console.error);
         }
         this.ffmpegProcesses.delete(transcode.id);
       });
