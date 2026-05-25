@@ -6,6 +6,9 @@ import { liveTranscodeService } from '../services/live-transcode.service';
 import { liveRecordService } from '../services/live-record.service';
 import { livePlayService } from '../services/live-play.service';
 import { config } from '../config';
+import prisma from '../config/prisma';
+import fs from 'fs';
+import { LiveTranscodeConfig, LiveRecordConfig } from '../types';
 
 export class LiveRoomController {
   static async createRoom(req: Request, res: Response) {
@@ -228,7 +231,11 @@ export class LiveRoomController {
     try {
       const { id } = req.params;
 
-      const transcodes = liveTranscodeService.getActiveTranscodes(id);
+      const transcodes = await prisma.liveTranscode.findMany({
+        where: { liveRoomId: id, status: 'RUNNING' },
+        orderBy: { createdAt: 'desc' },
+        include: { template: true },
+      });
       const history = await liveTranscodeService.getTranscodeHistory(id);
 
       successResponse(res, { active: transcodes, history });
@@ -249,15 +256,98 @@ export class LiveRoomController {
     }
   }
 
+  static async startTranscode(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const { transcodeConfigs, templateIds } = req.body;
+
+      if (!transcodeConfigs && !templateIds) {
+        return errorResponse(res, 'transcodeConfigs or templateIds is required', 400);
+      }
+
+      const room = await prisma.liveRoom.findUnique({
+        where: { id },
+        include: { streams: { where: { status: 'PUSHING' } } },
+      });
+
+      if (!room) {
+        return errorResponse(res, 'Live room not found', 404);
+      }
+
+      if (room.streams.length === 0) {
+        return errorResponse(res, 'No active stream found', 400);
+      }
+
+      const stream = room.streams[0];
+      const inputUrl = `rtmp://localhost:${config.live.rtmp.port}/live/${room.streamKey}`;
+
+      let configs: LiveTranscodeConfig[] = [];
+
+      if (templateIds && Array.isArray(templateIds)) {
+        const templates = await prisma.transcodeTemplate.findMany({
+          where: { id: { in: templateIds } },
+        });
+
+        configs = templates.map(t => ({
+          name: t.name,
+          width: t.width || 1920,
+          height: t.height || 1080,
+          videoBitrate: t.videoBitrate || 4000,
+          audioBitrate: t.audioBitrate || 128,
+          videoCodec: (t.videoCodec as any).toLowerCase() as any,
+          audioCodec: (t.audioCodec as any).toLowerCase() as any,
+          framerate: t.framerate,
+        }));
+      } else if (transcodeConfigs && Array.isArray(transcodeConfigs)) {
+        configs = transcodeConfigs.map((c: any) => ({
+          name: c.name,
+          width: c.width,
+          height: c.height,
+          videoBitrate: c.videoBitrate,
+          audioBitrate: c.audioBitrate,
+          videoCodec: c.videoCodec,
+          audioCodec: c.audioCodec,
+          framerate: c.framerate,
+          isBackup: c.isBackup,
+        }));
+      }
+
+      const sessions = await liveTranscodeService.startTranscodes(id, configs, inputUrl);
+
+      successResponse(res, { sessions, count: sessions.length }, 'Transcode started successfully', 201);
+    } catch (error: any) {
+      errorResponse(res, error.message, 500);
+    }
+  }
+
+  static async stopTranscode(req: Request, res: Response) {
+    try {
+      const { id, transcodeId } = req.params;
+
+      await liveTranscodeService.stopTranscode(id, transcodeId);
+
+      successResponse(res, null, 'Transcode stopped successfully');
+    } catch (error: any) {
+      errorResponse(res, error.message, 500);
+    }
+  }
+
   static async getRecordings(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      const { limit } = req.query;
+      const { limit, status } = req.query;
 
-      const history = await liveRecordService.getRecordingHistory(
-        id,
-        limit ? parseInt(limit as string) : undefined
-      );
+      const where: any = { liveRoomId: id };
+      if (status) {
+        where.status = status;
+      }
+
+      const history = await prisma.liveRecording.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: limit ? parseInt(limit as string) : 50,
+        include: { video: true },
+      });
       const active = liveRecordService.getActiveRecords(id);
 
       successResponse(res, { active, history });
@@ -273,6 +363,93 @@ export class LiveRoomController {
       const stats = await liveRecordService.getRecordingStats(id);
 
       successResponse(res, stats);
+    } catch (error: any) {
+      errorResponse(res, error.message, 500);
+    }
+  }
+
+  static async startRecording(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const { format, sliceDuration, autoConvertVod } = req.body;
+
+      const room = await prisma.liveRoom.findUnique({
+        where: { id },
+      });
+
+      if (!room) {
+        return errorResponse(res, 'Live room not found', 404);
+      }
+
+      const recordConfig: Partial<LiveRecordConfig> = {};
+      if (format) recordConfig.format = format;
+      if (sliceDuration) recordConfig.sliceDuration = sliceDuration;
+      if (autoConvertVod) recordConfig.autoConvertVod = autoConvertVod;
+
+      const session = await liveRecordService.startRecording(id, recordConfig);
+
+      successResponse(res, session, 'Recording started successfully', 201);
+    } catch (error: any) {
+      errorResponse(res, error.message, 500);
+    }
+  }
+
+  static async stopRecording(req: Request, res: Response) {
+    try {
+      const { id, recordingId } = req.params;
+
+      await liveRecordService.stopRecordingSegment(id, recordingId);
+
+      successResponse(res, null, 'Recording stopped successfully');
+    } catch (error: any) {
+      errorResponse(res, error.message, 500);
+    }
+  }
+
+  static async convertRecordingToVod(req: Request, res: Response) {
+    try {
+      const { id, recordingId } = req.params;
+
+      const videoId = await liveRecordService.convertToVod(id, recordingId);
+
+      if (!videoId) {
+        return errorResponse(res, 'Failed to convert recording to VOD', 500);
+      }
+
+      successResponse(res, { videoId }, 'Recording converted to VOD successfully');
+    } catch (error: any) {
+      errorResponse(res, error.message, 500);
+    }
+  }
+
+  static async deleteRecording(req: Request, res: Response) {
+    try {
+      const { id, recordingId } = req.params;
+
+      const recording = await prisma.liveRecording.findUnique({
+        where: { id: recordingId },
+      });
+
+      if (!recording) {
+        return errorResponse(res, 'Recording not found', 404);
+      }
+
+      if (recording.status === 'RECORDING') {
+        await liveRecordService.stopRecordingSegment(id, recordingId);
+      }
+
+      if (recording.filePath && fs.existsSync(recording.filePath)) {
+        try {
+          fs.unlinkSync(recording.filePath);
+        } catch {
+        }
+      }
+
+      await prisma.liveRecording.delete({
+        where: { id: recordingId },
+      });
+
+      successResponse(res, null, 'Recording deleted successfully');
     } catch (error: any) {
       errorResponse(res, error.message, 500);
     }

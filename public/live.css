@@ -243,7 +243,42 @@ body {
 
 .action-buttons {
     display: flex;
+    align-items: center;
     gap: 10px;
+}
+
+.quality-selector {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #252525;
+    padding: 8px 15px;
+    border-radius: 20px;
+}
+
+.quality-selector label {
+    font-size: 13px;
+    color: #888;
+}
+
+.quality-selector select {
+    background: #1a1a1a;
+    color: #fff;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 13px;
+    cursor: pointer;
+    outline: none;
+    transition: all 0.3s;
+}
+
+.quality-selector select:hover {
+    border-color: #667eea;
+}
+
+.quality-selector select:focus {
+    border-color: #667eea;
 }
 
 .btn-like {

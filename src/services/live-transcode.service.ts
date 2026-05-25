@@ -5,6 +5,7 @@ import { config } from '../config';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import fs from 'fs';
+import { spawn } from 'child_process';
 
 export interface TranscodeSession {
   id: string;
@@ -18,10 +19,12 @@ export interface TranscodeSession {
   startedAt: Date;
   isBackup: boolean;
   mainTranscodeId?: string;
+  process?: any;
 }
 
 class LiveTranscodeService extends EventEmitter {
   private activeTranscodes: Map<string, TranscodeSession[]> = new Map();
+  private ffmpegProcesses: Map<string, any> = new Map();
   private healthCheckTimer: NodeJS.Timeout | null = null;
 
   constructor() {
@@ -88,6 +91,49 @@ class LiveTranscodeService extends EventEmitter {
     return Date.now() - start;
   }
 
+  private buildFfmpegArgs(
+    inputUrl: string,
+    transcodeConfig: LiveTranscodeConfig,
+    outputDir: string,
+    outputId: string
+  ): string[] {
+    const args: string[] = [
+      '-i', inputUrl,
+      '-c:v', transcodeConfig.videoCodec === 'h264' ? 'libx264' : transcodeConfig.videoCodec === 'h265' ? 'libx265' : 'libx264',
+      '-preset', 'veryfast',
+      '-tune', 'zerolatency',
+      '-b:v', `${transcodeConfig.videoBitrate}k`,
+      '-maxrate', `${transcodeConfig.videoBitrate * 1.2}k`,
+      '-bufsize', `${transcodeConfig.videoBitrate * 2}k`,
+    ];
+
+    if (transcodeConfig.width && transcodeConfig.height) {
+      args.push('-s', `${transcodeConfig.width}x${transcodeConfig.height}`);
+    }
+
+    if (transcodeConfig.framerate) {
+      args.push('-r', String(transcodeConfig.framerate));
+    }
+
+    args.push(
+      '-c:a', transcodeConfig.audioCodec === 'aac' ? 'aac' : 'libmp3lame',
+      '-b:a', `${transcodeConfig.audioBitrate || 128}k`,
+      '-ar', '44100',
+      '-ac', '2',
+    );
+
+    args.push(
+      '-f', 'hls',
+      '-hls_time', String(config.live.hls.time),
+      '-hls_list_size', String(config.live.hls.listSize),
+      '-hls_flags', 'delete_segments+append_list',
+      '-hls_segment_filename', path.join(outputDir, 'segment_%03d.ts'),
+      path.join(outputDir, 'index.m3u8'),
+    );
+
+    return args;
+  }
+
   async startTranscode(
     liveRoomId: string,
     transcodeConfig: LiveTranscodeConfig,
@@ -140,6 +186,53 @@ class LiveTranscodeService extends EventEmitter {
     }
     this.activeTranscodes.get(liveRoomId)!.push(session);
 
+    if (inputUrl) {
+      const ffmpegArgs = this.buildFfmpegArgs(inputUrl, transcodeConfig, outputDir, outputId);
+
+      console.log('[LiveTranscode] Starting FFmpeg process:', {
+        liveRoomId,
+        name: transcodeConfig.name,
+        resolution: `${transcodeConfig.width}x${transcodeConfig.height}`,
+        bitrate: transcodeConfig.videoBitrate,
+      });
+
+      const proc = spawn(config.ffmpeg.ffmpegPath, ffmpegArgs, {
+        stdio: 'pipe',
+        shell: false,
+      });
+
+      if (proc.stderr) {
+        proc.stderr.on('data', (data: Buffer) => {
+          const lines = data.toString().split('\n').filter(Boolean);
+          for (const line of lines) {
+            if (line.includes('error') || line.includes('Error')) {
+              console.error(`[LiveTranscode][${transcodeConfig.name}]`, line);
+            }
+          }
+        });
+      }
+
+      proc.on('error', (err: Error) => {
+        console.error(`[LiveTranscode] FFmpeg error for ${transcodeConfig.name}:`, err.message);
+        session.status = 'failed';
+        prisma.liveTranscode.update({
+          where: { id: transcode.id },
+          data: { status: 'FAILED', errorMessage: err.message },
+        }).catch(console.error);
+      });
+
+      proc.on('exit', (code: number) => {
+        console.log(`[LiveTranscode] FFmpeg exited with code ${code} for ${transcodeConfig.name}`);
+        if (session.status === 'running') {
+          session.status = 'stopped';
+        }
+        this.ffmpegProcesses.delete(transcode.id);
+      });
+
+      session.process = proc;
+      this.ffmpegProcesses.set(transcode.id, proc);
+    }
+
     this.emit('transcode:start', session);
 
     return session;
@@ -169,7 +262,17 @@ class LiveTranscodeService extends EventEmitter {
       session.status = 'stopped';
       const index = sessions.indexOf(session);
       sessions.splice(index, 1);
+
+      if (session.process) {
+        try {
+          session.process.kill('SIGTERM');
+        } catch (err) {
+          console.error('[LiveTranscode] Error killing FFmpeg process:', err);
+        }
+      }
     }
+
+    this.ffmpegProcesses.delete(transcodeId);
 
     await prisma.liveTranscode.update({
       where: { id: transcodeId },
@@ -183,12 +286,23 @@ class LiveTranscodeService extends EventEmitter {
     const sessions = this.activeTranscodes.get(liveRoomId);
     if (!sessions) return;
 
-    for (const session of sessions) {
+    for (const session of [...sessions]) {
       session.status = 'stopped';
+
+      if (session.process) {
+        try {
+          session.process.kill('SIGTERM');
+        } catch (err) {
+          console.error('[LiveTranscode] Error killing FFmpeg process:', err);
+        }
+      }
+
       await prisma.liveTranscode.update({
         where: { id: session.id },
         data: { status: 'STOPPED', stoppedAt: new Date() },
       });
+
+      this.ffmpegProcesses.delete(session.id);
     }
 
     this.activeTranscodes.delete(liveRoomId);
@@ -309,6 +423,13 @@ class LiveTranscodeService extends EventEmitter {
   }
 
   destroy(): void {
+    for (const [id, proc] of this.ffmpegProcesses) {
+      try {
+        proc.kill('SIGTERM');
+      } catch {}
+    }
+    this.ffmpegProcesses.clear();
+
     if (this.healthCheckTimer) {
       clearInterval(this.healthCheckTimer);
       this.healthCheckTimer = null;

@@ -11,6 +11,8 @@
         currentTab: 'dashboard',
         videos: { page: 1, pageSize: 10, total: 0, items: [], filters: { search: '', categoryId: '', status: '' } },
         liveRooms: { page: 1, pageSize: 10, total: 0, items: [], filters: { search: '', categoryId: '', status: '' } },
+        transcodes: { items: [], filters: { liveRoomId: '' } },
+        recordings: { items: [], filters: { liveRoomId: '', status: '' } },
         categories: [],
         templates: [],
         tags: [],
@@ -170,7 +172,7 @@
         const titles = {
             dashboard: '概览', videos: '视频管理', upload: '上传视频',
             templates: '转码模板', categories: '分类管理', tags: '标签管理', storage: '存储管理',
-            'live-rooms': '直播间管理', 'live-gifts': '礼物管理',
+            'live-rooms': '直播间管理', 'live-transcodes': '转码管理', 'live-recordings': '录制管理', 'live-gifts': '礼物管理',
         };
         $('#breadcrumb').textContent = titles[tab] || '';
         if (tab === 'dashboard') loadDashboard();
@@ -180,6 +182,8 @@
         if (tab === 'tags') loadTags();
         if (tab === 'storage') loadStorage();
         if (tab === 'live-rooms') loadLiveRooms();
+        if (tab === 'live-transcodes') loadTranscodes();
+        if (tab === 'live-recordings') loadRecordings();
         if (tab === 'live-gifts') loadGifts();
     }
 
@@ -1376,21 +1380,333 @@
             const rows = (d.history || []).map(r => `
                 <tr>
                     <td>${r.format}</td>
-                    <td>${r.status === 'COMPLETED' ? '<span class="badge badge-success">完成</span>' : r.status === 'RECORDING' ? '<span class="badge badge-warning">录制中</span>' : r.status === 'STOPPED' ? '<span class="badge badge-muted">已停止</span>' : '<span class="badge badge-danger">失败</span>'}</td>
+                    <td>${recordingStatusBadge(r.status)}</td>
                     <td>${fmtSize(r.fileSize)}</td>
                     <td>${fmtDuration(r.duration)}</td>
                     <td style="white-space:nowrap;">${fmtDate(r.startedAt)}</td>
                     <td>${r.segmentIndex || 0}</td>
+                    <td>${r.video ? '<a class="link" href="/player/' + r.videoId + '" target="_blank">播放</a>' : '-'}</td>
                 </tr>
             `).join('');
             const html = `
                 <div style="margin-bottom:12px;"><span class="badge badge-info">录制中: ${(d.active || []).length}</span> <span class="badge">总计: ${(d.history || []).length}</span></div>
                 <table class="table">
-                    <thead><tr><th>格式</th><th>状态</th><th>大小</th><th>时长</th><th>开始时间</th><th>片段</th></tr></thead>
-                    <tbody>${rows || '<tr><td colspan="6" class="empty">暂无录制</td></tr>'}</tbody>
+                    <thead><tr><th>格式</th><th>状态</th><th>大小</th><th>时长</th><th>开始时间</th><th>片段</th><th>关联视频</th></tr></thead>
+                    <tbody>${rows || '<tr><td colspan="7" class="empty">暂无录制</td></tr>'}</tbody>
                 </table>
             `;
             modal.open({ title: '录制文件', body: html, size: 'lg', footer: '<button class="btn btn-ghost" data-close="modal">关闭</button>' });
+        } catch (e) { toast.error(e.message); }
+    }
+
+    function recordingStatusBadge(status) {
+        const map = {
+            RECORDING: ['录制中', 'badge-warning'],
+            STOPPED: ['已停止', 'badge-muted'],
+            CONVERTING: ['转换中', 'badge-info'],
+            COMPLETED: ['已完成', 'badge-success'],
+            FAILED: ['失败', 'badge-danger'],
+        };
+        const [label, cls] = map[status] || [status || '-', 'badge-muted'];
+        return `<span class="badge ${cls}">${label}</span>`;
+    }
+
+    async function loadLiveRoomsForSelect() {
+        try {
+            const res = await api.get('/live-rooms?page=1&pageSize=100');
+            const rooms = res.data?.items || [];
+            const opts = rooms.map(r => `<option value="${r.id}">${escapeHtml(r.title)}</option>`).join('');
+            const transFilter = $('#transcodeLiveRoomFilter');
+            if (transFilter) transFilter.innerHTML = '<option value="">选择直播间</option>' + opts;
+            const recFilter = $('#recordingLiveRoomFilter');
+            if (recFilter) recFilter.innerHTML = '<option value="">选择直播间</option>' + opts;
+        } catch {}
+    }
+
+    async function loadTranscodes() {
+        try {
+            const { liveRoomId } = STATE.transcodes.filters;
+            let url = '/live-rooms';
+            if (liveRoomId) {
+                url += '/' + liveRoomId + '/transcodes';
+            } else {
+                url += '/active';
+            }
+
+            let allTranscodes = [];
+
+            if (liveRoomId) {
+                const res = await api.get('/live-rooms/' + liveRoomId + '/transcodes');
+                allTranscodes = res.data?.active || [];
+            } else {
+                const roomsRes = await api.get('/live-rooms?page=1&pageSize=100&status=LIVING');
+                const rooms = roomsRes.data?.items || [];
+
+                for (const room of rooms) {
+                    try {
+                        const res = await api.get('/live-rooms/' + room.id + '/transcodes');
+                        const transcodes = res.data?.active || [];
+                        transcodes.forEach(t => { t.liveRoomTitle = room.title; });
+                        allTranscodes = allTranscodes.concat(transcodes);
+                    } catch {}
+                }
+            }
+
+            STATE.transcodes.items = allTranscodes;
+            renderTranscodesTable();
+            renderTranscodeStats();
+        } catch (e) {
+            $('#transcodesTable tbody').innerHTML = `<tr><td colspan="10" class="empty">加载失败: ${escapeHtml(e.message)}</td></tr>`;
+        }
+    }
+
+    function renderTranscodeStats() {
+        const items = STATE.transcodes.items;
+        const running = items.filter(t => t.status === 'RUNNING');
+        const avgLatency = running.length > 0 ? Math.round(running.reduce((sum, t) => sum + (t.latencyMs || 0), 0) / running.length) : 0;
+        const maxLatency = Math.max(...running.map(t => t.latencyMs || 0), 0);
+
+        $('#runningCount').textContent = running.length;
+        $('#avgLatency').textContent = avgLatency + 'ms';
+        $('#maxLatency').textContent = maxLatency + 'ms';
+        $('#totalCount').textContent = items.length;
+    }
+
+    function renderTranscodesTable() {
+        const rows = STATE.transcodes.items.map(t => `
+            <tr data-id="${t.id}" data-room-id="${t.liveRoomId}">
+                <td>${escapeHtml(t.liveRoomTitle || '-')}</td>
+                <td><strong>${escapeHtml(t.name)}</strong></td>
+                <td>${t.width}×${t.height}</td>
+                <td>${t.videoBitrate / 1000} kbps</td>
+                <td>${(t.audioBitrate || 0) / 1000} kbps</td>
+                <td><span class="badge">${t.videoCodec}</span> / <span class="badge badge-muted">${t.audioCodec}</span></td>
+                <td>${t.latencyMs || 0}ms</td>
+                <td>${t.isBackup ? '<span class="badge badge-warning">备路</span>' : '<span class="badge badge-info">主路</span>'}</td>
+                <td>${t.status === 'RUNNING' ? '<span class="badge badge-success">运行中</span>' : t.status === 'SWITCHED' ? '<span class="badge badge-info">已切换</span>' : '<span class="badge badge-muted">已停止</span>'}</td>
+                <td>
+                    <div class="action-group">
+                        ${t.status === 'RUNNING' ? '<button class="action-btn danger" data-action="stop-transcode">停止</button>' : ''}
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+        $('#transcodesTable tbody').innerHTML = rows || '<tr><td colspan="10" class="empty">暂无转码任务</td></tr>';
+    }
+
+    async function startTranscode() {
+        const liveRoomId = $('#transcodeLiveRoomFilter').value;
+        if (!liveRoomId) {
+            toast.warning('请选择直播间');
+            return;
+        }
+
+        try {
+            const templatesRes = await api.get('/transcode-templates');
+            const templates = templatesRes.data || [];
+            const body = document.createElement('div');
+            body.innerHTML = `
+                <div style="margin-bottom:12px;font-size:13px;color:var(--text-muted);">选择转码模板，可多选启动多清晰度转码：</div>
+                <div id="transcodeTplList" style="max-height:400px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;">
+                    ${templates.map(t => `
+                        <label class="checkbox" style="padding:10px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);">
+                            <input type="checkbox" value="${t.id}" ${t.isPreset ? 'checked' : ''}>
+                            <div style="flex:1;">
+                                <div style="font-weight:500;">${escapeHtml(t.name)} ${t.isPreset ? '<span class="badge badge-info">预设</span>' : ''}</div>
+                                <div style="font-size:12px;color:var(--text-dim);">${t.width || '?'}×${t.height || '?'} · ${(t.videoBitrate || 0) / 1000}kbps · ${t.videoCodec}</div>
+                            </div>
+                        </label>
+                    `).join('')}
+                </div>
+                <div style="margin-top:12px;font-size:12px;color:var(--text-dim);">提示：请确保直播间正在推流中</div>
+            `;
+            const footer = document.createElement('div');
+            footer.innerHTML = '<button class="btn btn-ghost" data-close="modal">取消</button><button class="btn btn-primary" id="confirmStartTranscodeBtn">启动转码</button>';
+            modal.open({ title: '启动直播转码', body, footer, size: 'lg' });
+            footer.querySelector('#confirmStartTranscodeBtn').onclick = async () => {
+                const ids = $$('#transcodeTplList input:checked', body).map(i => i.value);
+                if (ids.length === 0) {
+                    toast.warning('请至少选择一个模板');
+                    return;
+                }
+                try {
+                    await api.post('/live-rooms/' + liveRoomId + '/transcodes/start', { templateIds: ids });
+                    toast.success('转码任务已启动');
+                    modal.close();
+                    loadTranscodes();
+                } catch (e) { toast.error(e.message); }
+            };
+        } catch (e) { toast.error(e.message); }
+    }
+
+    async function stopTranscode(id, liveRoomId) {
+        const ok = await modal.confirm({ title: '停止转码', message: '确定要停止该转码任务吗？', okText: '停止', danger: true });
+        if (!ok) return;
+        try {
+            await api.post('/live-rooms/' + liveRoomId + '/transcodes/' + id + '/stop');
+            toast.success('已停止');
+            loadTranscodes();
+        } catch (e) { toast.error(e.message); }
+    }
+
+    async function loadRecordings() {
+        try {
+            const { liveRoomId, status } = STATE.recordings.filters;
+            let allRecordings = [];
+
+            if (liveRoomId) {
+                const params = new URLSearchParams();
+                if (status) params.set('status', status);
+                const res = await api.get('/live-rooms/' + liveRoomId + '/recordings' + (params.toString() ? '?' + params.toString() : ''));
+                const recordings = res.data?.history || [];
+                const room = await api.get('/live-rooms/' + liveRoomId);
+                recordings.forEach(r => { r.liveRoomTitle = room.data?.title || '-'; });
+                allRecordings = recordings;
+            } else {
+                const roomsRes = await api.get('/live-rooms?page=1&pageSize=100');
+                const rooms = roomsRes.data?.items || [];
+
+                for (const room of rooms) {
+                    try {
+                        const params = new URLSearchParams();
+                        if (status) params.set('status', status);
+                        const res = await api.get('/live-rooms/' + room.id + '/recordings' + (params.toString() ? '?' + params.toString() : ''));
+                        const recordings = res.data?.history || [];
+                        recordings.forEach(r => { r.liveRoomTitle = room.title; });
+                        allRecordings = allRecordings.concat(recordings);
+                    } catch {}
+                }
+            }
+
+            STATE.recordings.items = allRecordings;
+            renderRecordingsTable();
+            renderRecordingStats();
+        } catch (e) {
+            $('#recordingsTable tbody').innerHTML = `<tr><td colspan="10" class="empty">加载失败: ${escapeHtml(e.message)}</td></tr>`;
+        }
+    }
+
+    function renderRecordingStats() {
+        const items = STATE.recordings.items;
+        const recording = items.filter(r => r.status === 'RECORDING');
+        const completed = items.filter(r => r.status === 'COMPLETED');
+        const totalDuration = items.reduce((sum, r) => sum + (r.duration || 0), 0);
+        const totalSize = items.reduce((sum, r) => sum + Number(r.fileSize || 0), 0);
+
+        $('#recordingCount').textContent = recording.length;
+        $('#completedCount').textContent = completed.length;
+        $('#totalDuration').textContent = fmtDuration(totalDuration);
+        $('#totalSize').textContent = fmtSize(totalSize);
+    }
+
+    function renderRecordingsTable() {
+        const rows = STATE.recordings.items.map(r => `
+            <tr data-id="${r.id}" data-room-id="${r.liveRoomId}">
+                <td>${escapeHtml(r.liveRoomTitle || '-')}</td>
+                <td><span class="badge">${r.format}</span></td>
+                <td>${recordingStatusBadge(r.status)}</td>
+                <td>${fmtSize(r.fileSize)}</td>
+                <td>${fmtDuration(r.duration)}</td>
+                <td>${r.segmentIndex || 0}</td>
+                <td style="white-space:nowrap;">${fmtDate(r.startedAt)}</td>
+                <td style="white-space:nowrap;">${fmtDate(r.stoppedAt)}</td>
+                <td>${r.video ? '<a class="link" href="/player/' + r.videoId + '" target="_blank">播放</a>' : '-'}</td>
+                <td>
+                    <div class="action-group">
+                        ${r.status === 'RECORDING' ? '<button class="action-btn danger" data-action="stop-recording">停止</button>' : ''}
+                        ${r.status === 'COMPLETED' && !r.videoId ? '<button class="action-btn primary" data-action="convert-vod">转点播</button>' : ''}
+                        <button class="action-btn danger" data-action="delete-recording">删除</button>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+        $('#recordingsTable tbody').innerHTML = rows || '<tr><td colspan="10" class="empty">暂无录制文件</td></tr>';
+    }
+
+    async function startRecording() {
+        const liveRoomId = $('#recordingLiveRoomFilter').value;
+        if (!liveRoomId) {
+            toast.warning('请选择直播间');
+            return;
+        }
+
+        const body = document.createElement('div');
+        body.innerHTML = `
+            <form class="form" id="recordForm">
+                <div class="form-row"><label class="form-label">录制格式</label>
+                    <select class="input" name="format">
+                        <option value="FLV">FLV</option>
+                        <option value="HLS">HLS</option>
+                        <option value="MP4">MP4</option>
+                    </select>
+                </div>
+                <div class="form-row"><label class="form-label">分片时长（秒，0表示不分片）</label>
+                    <input class="input" name="sliceDuration" type="number" value="3600" min="0">
+                </div>
+                <div style="display:flex;gap:20px;">
+                    <label class="checkbox"><input type="checkbox" name="autoConvertVod" checked> 停止后自动转点播</label>
+                </div>
+            </form>
+        `;
+        const footer = document.createElement('div');
+        footer.innerHTML = '<button class="btn btn-ghost" data-close="modal">取消</button><button class="btn btn-primary" id="confirmStartRecordingBtn">开始录制</button>';
+        modal.open({ title: '开始录制', body, footer, size: 'sm' });
+        footer.querySelector('#confirmStartRecordingBtn').onclick = async () => {
+            const form = body.querySelector('#recordForm');
+            const payload = {
+                format: form.format.value,
+                sliceDuration: Number(form.sliceDuration.value) || 0,
+                autoConvertVod: form.autoConvertVod.checked,
+            };
+            try {
+                await api.post('/live-rooms/' + liveRoomId + '/recordings/start', payload);
+                toast.success('录制已开始');
+                modal.close();
+                loadRecordings();
+            } catch (e) { toast.error(e.message); }
+        };
+    }
+
+    async function stopRecording(id, liveRoomId) {
+        const ok = await modal.confirm({ title: '停止录制', message: '确定要停止该录制任务吗？', okText: '停止', danger: true });
+        if (!ok) return;
+        try {
+            await api.post('/live-rooms/' + liveRoomId + '/recordings/' + id + '/stop');
+            toast.success('已停止');
+            loadRecordings();
+        } catch (e) { toast.error(e.message); }
+    }
+
+    async function convertRecordingToVod(id, liveRoomId) {
+        const ok = await modal.confirm({ title: '转点播', message: '确定要将该录制转换为点播视频吗？', okText: '转换' });
+        if (!ok) return;
+        try {
+            const res = await api.post('/live-rooms/' + liveRoomId + '/recordings/' + id + '/convert-vod');
+            const videoId = res.data?.videoId;
+            if (videoId) {
+                toast.success('转换成功');
+                modal.open({
+                    title: '转换成功',
+                    body: `<div style="text-align:center;padding:10px;">
+                        <div style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">视频ID</div>
+                        <div style="font-family:monospace;font-size:14px;background:var(--bg-secondary);padding:10px;border-radius:6px;">${escapeHtml(videoId)}</div>
+                        <div style="margin-top:12px;"><a class="link" href="/player/${videoId}" target="_blank">播放视频</a></div>
+                    </div>`,
+                    footer: '<button class="btn btn-primary" data-close="modal">确定</button>',
+                    size: 'sm',
+                });
+            }
+            loadRecordings();
+        } catch (e) { toast.error(e.message); }
+    }
+
+    async function deleteRecording(id, liveRoomId) {
+        const ok = await modal.confirm({ title: '删除录制', message: '确定要删除该录制文件吗？此操作不可恢复。', okText: '删除', danger: true });
+        if (!ok) return;
+        try {
+            await api.delete('/live-rooms/' + liveRoomId + '/recordings/' + id);
+            toast.success('已删除');
+            loadRecordings();
         } catch (e) { toast.error(e.message); }
     }
 
@@ -1544,6 +1860,7 @@
             if (!action) return;
             const row = e.target.closest('tr');
             const id = e.target.dataset.id || (row && row.dataset.id);
+            const roomId = row && row.dataset.roomId;
 
             if (action === 'view' && e.target.closest('#videosTable')) viewVideo(id);
             else if (action === 'play' && e.target.closest('#videosTable')) playVideo(id);
@@ -1576,6 +1893,11 @@
             else if (action === 'stream-config') viewStreamConfig(id);
             else if (action === 'room-stats') viewRoomStats(id);
             else if (action === 'recordings') viewRoomRecordings(id);
+
+            else if (action === 'stop-transcode') stopTranscode(id, roomId);
+            else if (action === 'stop-recording') stopRecording(id, roomId);
+            else if (action === 'convert-vod') convertRecordingToVod(id, roomId);
+            else if (action === 'delete-recording') deleteRecording(id, roomId);
 
             else if (action === 'edit-gift') editGift(id);
             else if (action === 'toggle-gift') toggleGift(id);
@@ -1641,6 +1963,22 @@
             if (!isNaN(p)) { STATE.liveRooms.page = p; loadLiveRooms(); }
         });
 
+        $('#transcodeLiveRoomFilter').addEventListener('change', (e) => {
+            STATE.transcodes.filters.liveRoomId = e.target.value;
+            loadTranscodes();
+        });
+        $('#startTranscodeBtn').addEventListener('click', startTranscode);
+
+        $('#recordingLiveRoomFilter').addEventListener('change', (e) => {
+            STATE.recordings.filters.liveRoomId = e.target.value;
+            loadRecordings();
+        });
+        $('#recordingStatusFilter').addEventListener('change', (e) => {
+            STATE.recordings.filters.status = e.target.value;
+            loadRecordings();
+        });
+        $('#startRecordingBtn').addEventListener('click', startRecording);
+
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') modal.close();
         });
@@ -1658,6 +1996,7 @@
         bindEvents();
         initUploadTab();
         loadCategoriesForSelect();
+        loadLiveRoomsForSelect();
         checkHealth();
         loadDashboard();
         setInterval(checkHealth, 30000);

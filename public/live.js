@@ -12,6 +12,8 @@ let danmakuColor = '#FFFFFF';
 let likeCount = 0;
 let onlineCount = 0;
 let danmakuTracks = [];
+let currentStreamKey = null;
+let availableQualities = [];
 const MAX_TRACKS = 10;
 
 function getRoomId() {
@@ -114,8 +116,15 @@ function initPlayer(room) {
     playerLoading.style.display = 'flex';
 
     const streamKey = room.streamKey;
+    currentStreamKey = streamKey;
     const hlsUrl = `/hls/${streamKey}/index.m3u8`;
     const flvUrl = `/live/${streamKey}.flv`;
+
+    availableQualities = [
+        { name: '原画', url: hlsUrl, flvUrl: flvUrl, isOriginal: true }
+    ];
+    updateQualitySelector();
+    loadTranscodeQualities(currentRoomId);
 
     videoElement.addEventListener('playing', () => {
         playerLoading.style.display = 'none';
@@ -157,6 +166,103 @@ function initPlayer(room) {
         videoElement.play().catch(err => console.log('Autoplay prevented:', err));
     } else {
         playerLoading.innerHTML = '<p style="color:#ff6b6b;">您的浏览器不支持视频播放</p>';
+    }
+}
+
+async function loadTranscodeQualities(roomId) {
+    try {
+        const response = await fetch(`${API_BASE}/live-rooms/${roomId}/transcodes`);
+        const result = await response.json();
+        
+        if (result.success && result.data?.active) {
+            const transcodes = result.data.active;
+            const newQualities = [
+                { name: '原画', url: `/hls/${currentStreamKey}/index.m3u8`, flvUrl: `/live/${currentStreamKey}.flv`, isOriginal: true }
+            ];
+            
+            transcodes.forEach(t => {
+                if (t.status === 'RUNNING' && t.outputUrl) {
+                    newQualities.push({
+                        name: t.name,
+                        url: t.outputUrl,
+                        flvUrl: null,
+                        isOriginal: false,
+                        resolution: `${t.width}x${t.height}`
+                    });
+                }
+            });
+            
+            availableQualities = newQualities;
+            updateQualitySelector();
+        }
+    } catch (error) {
+        console.error('Failed to load transcodes:', error);
+    }
+}
+
+function updateQualitySelector() {
+    const select = document.getElementById('qualitySelect');
+    if (!select) return;
+    
+    const currentValue = select.value;
+    select.innerHTML = availableQualities.map((q, index) => 
+        `<option value="${index}" ${q.isOriginal ? 'selected' : ''}>${q.name}${q.resolution ? ` (${q.resolution})` : ''}</option>`
+    ).join('');
+    
+    if (currentValue !== null) {
+        select.value = currentValue;
+    }
+}
+
+function switchQuality(qualityIndex) {
+    const quality = availableQualities[qualityIndex];
+    if (!quality) return;
+    
+    const videoElement = document.getElementById('videoPlayer');
+    const playerLoading = document.getElementById('playerLoading');
+    
+    playerLoading.style.display = 'flex';
+    playerLoading.innerHTML = '<div class="loading-spinner"></div><p>切换清晰度...</p>';
+    
+    if (hls) {
+        hls.destroy();
+        hls = null;
+    }
+    
+    if (flvPlayer) {
+        flvPlayer.destroy();
+        flvPlayer = null;
+    }
+    
+    if (Hls.isSupported()) {
+        hls = new Hls({
+            enableWorker: true,
+            lowLatencyMode: true,
+            liveSyncDurationCount: 3,
+            liveDurationInfinity: true,
+        });
+
+        hls.loadSource(quality.url);
+        hls.attachMedia(videoElement);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            videoElement.play().catch(err => console.log('Autoplay prevented:', err));
+            playerLoading.style.display = 'none';
+        });
+
+        hls.on(Hls.Events.ERROR, (event, data) => {
+            if (data.fatal) {
+                console.log('HLS fatal error:', data);
+                playerLoading.innerHTML = '<p style="color:#ff6b6b;">清晰度切换失败</p>';
+            }
+        });
+    } else if (flvjs.isSupported() && quality.flvUrl) {
+        initFlvPlayer(quality.flvUrl);
+        playerLoading.style.display = 'none';
+    } else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
+        videoElement.src = quality.url;
+        videoElement.play().catch(err => console.log('Autoplay prevented:', err));
+        playerLoading.style.display = 'none';
     }
 }
 
@@ -476,6 +582,11 @@ function initEventListeners() {
 
     document.getElementById('danmakuColor').addEventListener('change', (e) => {
         danmakuColor = e.target.value;
+    });
+
+    document.getElementById('qualitySelect').addEventListener('change', (e) => {
+        const qualityIndex = parseInt(e.target.value);
+        switchQuality(qualityIndex);
     });
 
     document.querySelectorAll('.tab-btn').forEach(btn => {

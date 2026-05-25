@@ -4,7 +4,9 @@ import { config } from '../config';
 import { liveStreamService } from './live-stream.service';
 import { liveRoomService } from './live-room.service';
 import { liveRecordService } from './live-record.service';
+import { liveTranscodeService } from './live-transcode.service';
 import { liveInteractService } from './live-interact.service';
+import prisma from '../config/prisma';
 
 export class MediaServerService {
   private nms: any | null = null;
@@ -106,6 +108,9 @@ export class MediaServerService {
         this.stopHlsProcess(streamInfo.liveRoomId);
 
         if (streamInfo.isPrimary) {
+          liveTranscodeService.stopAllTranscodes(streamInfo.liveRoomId)
+            .catch(err => console.error('[MediaServer] Error stopping transcodes:', err));
+
           liveRecordService.stopAllRecordings(streamInfo.liveRoomId)
             .catch(err => console.error('[MediaServer] Error stopping recordings:', err));
 
@@ -216,6 +221,30 @@ export class MediaServerService {
           .catch(err => console.error('[MediaServer] Error updating room status:', err));
 
         this.startHlsProcess(authResult.liveRoomId!, streamKey);
+
+        const transcodeTemplates = await prisma.transcodeTemplate.findMany({
+          where: { isPreset: true },
+        });
+
+        if (transcodeTemplates.length > 0) {
+          const inputUrl = `rtmp://127.0.0.1:${config.live.rtmp.port}/live/${streamKey}`;
+          const transcodeConfigs = transcodeTemplates.map(t => ({
+            name: t.name,
+            width: t.width || 1920,
+            height: t.height || 1080,
+            videoBitrate: t.videoBitrate || 4000,
+            audioBitrate: t.audioBitrate || 128,
+            videoCodec: (t.videoCodec || 'H264').toLowerCase() as any,
+            audioCodec: (t.audioCodec || 'AAC').toLowerCase() as any,
+            framerate: t.framerate || 30,
+          }));
+
+          liveTranscodeService.startTranscodes(authResult.liveRoomId!, transcodeConfigs, inputUrl)
+            .then(sessions => {
+              console.log('[MediaServer] Auto-started', sessions.length, 'transcode sessions');
+            })
+            .catch(err => console.error('[MediaServer] Error starting transcodes:', err));
+        }
       }
 
       console.log('[MediaServer] Stream setup complete:', {

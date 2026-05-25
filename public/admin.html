@@ -42,6 +42,12 @@
                 <a class="nav-item" data-tab="live-rooms">
                     <span class="nav-icon">📺</span><span>直播间管理</span>
                 </a>
+                <a class="nav-item" data-tab="live-transcodes">
+                    <span class="nav-icon">🔄</span><span>转码管理</span>
+                </a>
+                <a class="nav-item" data-tab="live-recordings">
+                    <span class="nav-icon">🎙️</span><span>录制管理</span>
+                </a>
                 <a class="nav-item" data-tab="live-gifts">
                     <span class="nav-icon">🎁</span><span>礼物管理</span>
                 </a>
@@ -352,6 +358,96 @@
                             </table>
                         </div>
                         <div class="pagination" id="liveRoomsPagination"></div>
+                    </div>
+                </div>
+
+                <div class="tab-pane" id="tab-live-transcodes">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>直播转码管理</h3>
+                            <div class="filters">
+                                <select class="input" id="transcodeLiveRoomFilter">
+                                    <option value="">选择直播间</option>
+                                </select>
+                                <button class="btn btn-primary" id="startTranscodeBtn">+ 启动转码</button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="stats-grid" id="transcodeStats" style="grid-template-columns: repeat(4,1fr);margin-bottom:16px;">
+                                <div class="stat-card"><div class="stat-label">运行中</div><div class="stat-value" id="runningCount">0</div></div>
+                                <div class="stat-card info"><div class="stat-label">平均延迟</div><div class="stat-value" id="avgLatency">0ms</div></div>
+                                <div class="stat-card warning"><div class="stat-label">最大延迟</div><div class="stat-value" id="maxLatency">0ms</div></div>
+                                <div class="stat-card success"><div class="stat-label">总转码数</div><div class="stat-value" id="totalCount">0</div></div>
+                            </div>
+                        </div>
+                        <div class="table-wrapper">
+                            <table class="table" id="transcodesTable">
+                                <thead>
+                                    <tr>
+                                        <th>直播间</th>
+                                        <th>名称</th>
+                                        <th>分辨率</th>
+                                        <th>视频码率</th>
+                                        <th>音频码率</th>
+                                        <th>编码</th>
+                                        <th>延迟</th>
+                                        <th>类型</th>
+                                        <th>状态</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody><tr><td colspan="10" class="empty">加载中...</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tab-pane" id="tab-live-recordings">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>直播录制管理</h3>
+                            <div class="filters">
+                                <select class="input" id="recordingLiveRoomFilter">
+                                    <option value="">选择直播间</option>
+                                </select>
+                                <select class="input" id="recordingStatusFilter">
+                                    <option value="">全部状态</option>
+                                    <option value="RECORDING">录制中</option>
+                                    <option value="STOPPED">已停止</option>
+                                    <option value="CONVERTING">转换中</option>
+                                    <option value="COMPLETED">已完成</option>
+                                    <option value="FAILED">失败</option>
+                                </select>
+                                <button class="btn btn-primary" id="startRecordingBtn">+ 开始录制</button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="stats-grid" id="recordingStats" style="grid-template-columns: repeat(4,1fr);margin-bottom:16px;">
+                                <div class="stat-card warning"><div class="stat-label">录制中</div><div class="stat-value" id="recordingCount">0</div></div>
+                                <div class="stat-card"><div class="stat-label">已完成</div><div class="stat-value" id="completedCount">0</div></div>
+                                <div class="stat-card success"><div class="stat-label">总时长</div><div class="stat-value" id="totalDuration">0s</div></div>
+                                <div class="stat-card info"><div class="stat-label">总大小</div><div class="stat-value" id="totalSize">0 B</div></div>
+                            </div>
+                        </div>
+                        <div class="table-wrapper">
+                            <table class="table" id="recordingsTable">
+                                <thead>
+                                    <tr>
+                                        <th>直播间</th>
+                                        <th>格式</th>
+                                        <th>状态</th>
+                                        <th>文件大小</th>
+                                        <th>时长</th>
+                                        <th>片段</th>
+                                        <th>开始时间</th>
+                                        <th>结束时间</th>
+                                        <th>关联视频</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody><tr><td colspan="10" class="empty">加载中...</td></tr></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
 
