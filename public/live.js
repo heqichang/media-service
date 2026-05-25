@@ -2,7 +2,6 @@ const API_BASE = '/api/v1';
 const SOCKET_URL = window.location.origin;
 
 let socket = null;
-let player = null;
 let hls = null;
 let flvPlayer = null;
 let currentRoomId = null;
@@ -46,6 +45,21 @@ function initLogin() {
         }
 
         try {
+            const verifyResponse = await fetch(`${API_BASE}/live-rooms/${roomId}/verify-password`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ password }),
+            });
+            
+            const verifyResult = await verifyResponse.json();
+            
+            if (!verifyResult.success || !verifyResult.data?.valid) {
+                showLoginError('密码错误，请重试');
+                return;
+            }
+
             const response = await fetch(`${API_BASE}/live-rooms/${roomId}`);
             const result = await response.json();
 
@@ -95,34 +109,44 @@ function showLoginError(message) {
 
 function initPlayer(room) {
     const videoElement = document.getElementById('videoPlayer');
+    const playerLoading = document.getElementById('playerLoading');
     
-    player = videojs('videoPlayer', {
-        fluid: false,
-        controls: true,
-        autoplay: true,
-        muted: true,
-        preload: 'auto',
-    });
+    playerLoading.style.display = 'flex';
 
     const streamKey = room.streamKey;
     const hlsUrl = `/hls/${streamKey}/index.m3u8`;
     const flvUrl = `/live/${streamKey}.flv`;
+
+    videoElement.addEventListener('playing', () => {
+        playerLoading.style.display = 'none';
+    });
+
+    videoElement.addEventListener('error', () => {
+        playerLoading.innerHTML = '<p style="color:#ff6b6b;">直播加载失败，请稍后重试</p>';
+    });
 
     if (Hls.isSupported()) {
         hls = new Hls({
             enableWorker: true,
             lowLatencyMode: true,
             liveSyncDurationCount: 3,
+            liveDurationInfinity: true,
         });
 
         hls.loadSource(hlsUrl);
         hls.attachMedia(videoElement);
 
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            videoElement.play().catch(err => console.log('Autoplay prevented:', err));
+        });
+
         hls.on(Hls.Events.ERROR, (event, data) => {
             if (data.fatal) {
-                console.log('HLS error, trying FLV...');
+                console.log('HLS fatal error, trying FLV...', data);
                 if (flvjs.isSupported()) {
                     initFlvPlayer(flvUrl);
+                } else {
+                    playerLoading.innerHTML = '<p style="color:#ff6b6b;">直播加载失败</p>';
                 }
             }
         });
@@ -130,7 +154,9 @@ function initPlayer(room) {
         initFlvPlayer(flvUrl);
     } else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
         videoElement.src = hlsUrl;
-        videoElement.play();
+        videoElement.play().catch(err => console.log('Autoplay prevented:', err));
+    } else {
+        playerLoading.innerHTML = '<p style="color:#ff6b6b;">您的浏览器不支持视频播放</p>';
     }
 }
 
@@ -487,10 +513,6 @@ function cleanup() {
     
     if (flvPlayer) {
         flvPlayer.destroy();
-    }
-    
-    if (player) {
-        player.dispose();
     }
 }
 

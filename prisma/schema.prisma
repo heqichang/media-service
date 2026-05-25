@@ -273,6 +273,7 @@ model LiveRoom {
   categoryId  String?
   category    Category?       @relation(fields: [categoryId], references: [id])
   streamKey   String          @unique
+  viewPassword String?
   status      LiveRoomStatus  @default(NOT_STARTED)
   pushUrl     String?
   playUrlHls  String?

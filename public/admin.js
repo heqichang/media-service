@@ -1029,7 +1029,11 @@
     function renderLiveRoomsTable() {
         const rows = STATE.liveRooms.items.map(r => `
             <tr data-id="${r.id}">
-                <td><strong>${escapeHtml(r.title)}</strong><br><span style="color:var(--text-dim);font-size:11px;">${escapeHtml(r.description || '')}</span></td>
+                <td>
+                    <strong>${escapeHtml(r.title)}</strong><br>
+                    <span style="color:var(--text-dim);font-size:11px;">${escapeHtml(r.description || '')}</span>
+                    ${r.viewPassword ? '<br><span class="badge badge-warning" style="font-size:10px;">🔒 已设密码</span>' : ''}
+                </td>
                 <td>${liveRoomStatusBadge(r.status)}</td>
                 <td>${escapeHtml(r.category?.name || '-')}</td>
                 <td>${r.isRecorded ? '<span class="badge badge-success">录制</span>' : '<span class="badge badge-muted">不录制</span>'}</td>
@@ -1040,6 +1044,7 @@
                 <td>${fmtDuration(r.duration)}</td>
                 <td>
                     <div class="action-group">
+                        ${r.status === 'LIVING' ? '<a class="action-btn primary" href="/live/' + r.id + '" target="_blank">观看直播</a>' : ''}
                         <button class="action-btn primary" data-action="view-room">查看</button>
                         <button class="action-btn" data-action="stream-config">推流</button>
                         <button class="action-btn" data-action="edit-room">编辑</button>
@@ -1101,6 +1106,7 @@
                         </select>
                     </div>
                 </div>
+                <div class="form-row"><label class="form-label">观看密码 (留空表示无需密码)</label><input class="input" name="viewPassword" type="password" placeholder="设置观看密码"></div>
                 <div style="display:flex;gap:20px;">
                     <label class="checkbox"><input type="checkbox" name="isPublic" checked> 公开</label>
                     <label class="checkbox"><input type="checkbox" name="isRecorded" checked> 自动录制</label>
@@ -1121,6 +1127,7 @@
                 isRecorded: form.isRecorded.checked,
                 recordFormat: form.recordFormat.value,
                 maxBitrate: form.maxBitrate.value ? Number(form.maxBitrate.value) : undefined,
+                viewPassword: form.viewPassword.value || undefined,
             };
             if (!payload.title) { toast.warning('标题必填'); return; }
             try {
@@ -1212,6 +1219,7 @@
                             </select>
                         </div>
                     </div>
+                    <div class="form-row"><label class="form-label">观看密码 (留空表示清除密码)</label><input class="input" name="viewPassword" type="password" value="${escapeAttr(r.viewPassword || '')}" placeholder="设置或修改观看密码"></div>
                     <div style="display:flex;gap:20px;">
                         <label class="checkbox"><input type="checkbox" name="isPublic" ${r.isPublic ? 'checked' : ''}> 公开</label>
                         <label class="checkbox"><input type="checkbox" name="isRecorded" ${r.isRecorded ? 'checked' : ''}> 自动录制</label>
@@ -1232,6 +1240,7 @@
                     isRecorded: form.isRecorded.checked,
                     recordFormat: form.recordFormat.value,
                     maxBitrate: form.maxBitrate.value ? Number(form.maxBitrate.value) : undefined,
+                    viewPassword: form.viewPassword.value || null,
                 };
                 try {
                     await api.put('/live-rooms/' + id, payload);

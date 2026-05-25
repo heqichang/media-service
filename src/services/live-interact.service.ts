@@ -94,18 +94,32 @@ class LiveInteractService extends EventEmitter {
     if (isBanned) {
       await prisma.danmaku.create({
         data: {
-          ...message,
+          id: message.id,
+          liveRoomId: message.liveRoomId,
+          userId: message.userId,
+          userName: message.userName,
+          content: message.content,
+          color: message.color,
+          fontSize: message.fontSize,
+          mode: message.mode,
           status: 'BANNED',
-        } as any,
+        },
       });
       return null;
     }
 
     await prisma.danmaku.create({
       data: {
-        ...message,
+        id: message.id,
+        liveRoomId: message.liveRoomId,
+        userId: message.userId,
+        userName: message.userName,
+        content: message.content,
+        color: message.color,
+        fontSize: message.fontSize,
+        mode: message.mode,
         status: 'NORMAL',
-      } as any,
+      },
     });
 
     this.cacheDanmaku(message);

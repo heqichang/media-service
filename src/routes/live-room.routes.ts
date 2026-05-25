@@ -27,4 +27,6 @@ router.post('/plans', LiveRoomController.createPlan);
 router.get('/:liveRoomId/plans', LiveRoomController.getPlans);
 router.delete('/plans/:id', LiveRoomController.deletePlan);
 
+router.post('/:id/verify-password', LiveRoomController.verifyViewPassword);
+
 export default router;

@@ -10,7 +10,7 @@ import { config } from '../config';
 export class LiveRoomController {
   static async createRoom(req: Request, res: Response) {
     try {
-      const { title, description, coverUrl, categoryId, isPublic, isRecorded, recordFormat, maxBitrate } = req.body;
+      const { title, description, coverUrl, categoryId, isPublic, isRecorded, recordFormat, maxBitrate, viewPassword } = req.body;
 
       if (!title) {
         return errorResponse(res, 'Title is required', 400);
@@ -25,6 +25,7 @@ export class LiveRoomController {
         isRecorded,
         recordFormat,
         maxBitrate,
+        viewPassword,
       });
 
       successResponse(res, room, 'Live room created successfully', 201);
@@ -70,7 +71,7 @@ export class LiveRoomController {
   static async updateRoom(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      const { title, description, coverUrl, categoryId, isPublic, isRecorded, recordFormat, maxBitrate } = req.body;
+      const { title, description, coverUrl, categoryId, isPublic, isRecorded, recordFormat, maxBitrate, viewPassword } = req.body;
 
       const room = await liveRoomService.updateRoom(id, {
         title,
@@ -81,6 +82,7 @@ export class LiveRoomController {
         isRecorded,
         recordFormat,
         maxBitrate,
+        viewPassword,
       });
 
       successResponse(res, room, 'Live room updated successfully');
@@ -352,6 +354,27 @@ export class LiveRoomController {
       const roomIds = liveStreamService.getAllActiveRooms();
 
       successResponse(res, { activeRooms: roomIds, count: roomIds.length });
+    } catch (error: any) {
+      errorResponse(res, error.message, 500);
+    }
+  }
+
+  static async verifyViewPassword(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const { password } = req.body;
+
+      if (password === undefined || password === null) {
+        return errorResponse(res, 'Password is required', 400);
+      }
+
+      const isValid = await liveRoomService.verifyPassword(id, password);
+
+      if (isValid) {
+        successResponse(res, { valid: true }, 'Password verified successfully');
+      } else {
+        errorResponse(res, 'Invalid password', 401);
+      }
     } catch (error: any) {
       errorResponse(res, error.message, 500);
     }

@@ -23,6 +23,7 @@ class LiveRoomService extends EventEmitter {
     isRecorded?: boolean;
     recordFormat?: string;
     maxBitrate?: number;
+    viewPassword?: string;
   }): Promise<any> {
     const streamKey = liveStreamService.generateStreamKey();
 
@@ -33,6 +34,7 @@ class LiveRoomService extends EventEmitter {
         coverUrl: data.coverUrl,
         categoryId: data.categoryId,
         streamKey,
+        viewPassword: data.viewPassword,
         status: 'NOT_STARTED',
         isPublic: data.isPublic !== false,
         isRecorded: data.isRecorded !== false,
@@ -119,6 +121,7 @@ class LiveRoomService extends EventEmitter {
     isRecorded?: boolean;
     recordFormat?: string;
     maxBitrate?: number;
+    viewPassword?: string | null;
   }): Promise<any> {
     const room = await prisma.liveRoom.update({
       where: { id },
@@ -132,6 +135,19 @@ class LiveRoomService extends EventEmitter {
     this.emit('room:update', room);
 
     return room;
+  }
+
+  async verifyPassword(id: string, password: string): Promise<boolean> {
+    const room = await prisma.liveRoom.findUnique({
+      where: { id },
+      select: { viewPassword: true },
+    });
+
+    if (!room) return false;
+
+    if (!room.viewPassword) return true;
+
+    return room.viewPassword === password;
   }
 
   async deleteRoom(id: string): Promise<void> {
