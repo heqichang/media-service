@@ -290,7 +290,9 @@ export class UploadController {
       }
 
       const originalName = req.file.originalname;
-      const finalPath = path.join(uploadDir, originalName);
+      const ext = path.extname(originalName);
+      const safeName = uuidv4() + ext;
+      const finalPath = path.join(uploadDir, safeName);
       
       fs.renameSync(req.file.path, finalPath);
 
@@ -299,8 +301,8 @@ export class UploadController {
       const video = await prisma.video.create({
         data: {
           title: originalName,
-          fileName: originalName,
-          originalPath: `${uploadId}/${originalName}`,
+          fileName: safeName,
+          originalPath: `${uploadId}/${safeName}`,
           fileSize: BigInt(fileSize),
           status: VideoStatus.UPLOADED,
           uploadId,
@@ -315,7 +317,7 @@ export class UploadController {
           uploadId,
           videoId: video.id,
           filePath: finalPath,
-          fileName: originalName,
+          fileName: safeName,
           fileSize,
           originalName,
           thumbnailUrl: null,
