@@ -9,6 +9,19 @@ import { upload } from '../middleware/upload';
 
 const router = Router();
 
+function fixFilenameEncoding(name: string): string {
+  try {
+    if (/[^\x00-\x7F]/.test(name)) {
+      const buf = Buffer.from(name, 'latin1');
+      const decoded = buf.toString('utf8');
+      if (!/\ufffd/.test(decoded)) {
+        return decoded;
+      }
+    }
+  } catch {}
+  return name;
+}
+
 const simpleStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     const tempDir = path.join(config.upload.tempDir, 'simple');
@@ -18,15 +31,10 @@ const simpleStorage = multer.diskStorage({
     cb(null, tempDir);
   },
   filename: (req, file, cb) => {
-    let originalName = file.originalname;
-    try {
-      if (/[^\x00-\x7F]/.test(originalName)) {
-        originalName = Buffer.from(originalName, 'latin1').toString('utf8');
-      }
-    } catch (e) {}
+    const originalName = fixFilenameEncoding(file.originalname);
+    file.originalname = originalName;
     const ext = path.extname(originalName);
     const safeName = uuidv4() + ext;
-    file.originalname = originalName;
     cb(null, safeName);
   },
 });

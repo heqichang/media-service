@@ -282,12 +282,7 @@ export class UploadController {
         return errorResponse(res, 'No file uploaded', 400);
       }
 
-      let originalName = req.file.originalname;
-      try {
-        if (/[^\x00-\x7F]/.test(originalName)) {
-          originalName = Buffer.from(originalName, 'latin1').toString('utf8');
-        }
-      } catch (e) {}
+      const originalName = req.file.originalname;
 
       const uploadId = uuidv4();
       const uploadDir = path.join(config.upload.tempDir, uploadId);
