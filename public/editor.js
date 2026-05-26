@@ -16,11 +16,23 @@ function goBack() {
 }
 
 function formatTime(seconds) {
+  if (seconds == null || isNaN(seconds)) seconds = 0;
   const hrs = Math.floor(seconds / 3600);
   const mins = Math.floor((seconds % 3600) / 60);
   const secs = Math.floor(seconds % 60);
   const ms = Math.floor((seconds % 1) * 1000);
   return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
+}
+
+function formatRulerTime(seconds) {
+  if (seconds == null || isNaN(seconds)) seconds = 0;
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  if (hrs > 0) {
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+  }
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
 function updateUndoRedoButtons() {
@@ -93,6 +105,7 @@ function initVideoPlayerSync() {
     currentTime = video.currentTime;
     document.getElementById('currentTime').textContent = formatTime(currentTime);
     updatePlayhead();
+    updateTextOverlay();
   });
   
   video.addEventListener('play', () => {
@@ -110,9 +123,64 @@ function initVideoPlayerSync() {
     document.getElementById('playBtn').textContent = '▶';
   });
   
+  video.addEventListener('loadedmetadata', () => {
+    updateTextOverlay();
+  });
+  
   video.addEventListener('error', (e) => {
     console.error('Video playback error:', e);
   });
+}
+
+function updateTextOverlay() {
+  const overlay = document.getElementById('textOverlay');
+  if (!overlay) return;
+  
+  overlay.innerHTML = '';
+  
+  if (!timeline?.tracks) return;
+  
+  const video = document.getElementById('previewVideo');
+  const videoWidth = video?.videoWidth || 1920;
+  const videoHeight = video?.videoHeight || 1080;
+  
+  for (const track of timeline.tracks) {
+    if (!track.clips) continue;
+    
+    for (const clip of track.clips) {
+      if (currentTime < clip.startTime || currentTime > clip.endTime) continue;
+      
+      if (!clip.effects) continue;
+      
+      for (const effect of clip.effects) {
+        if (effect.type !== 'TEXT') continue;
+        
+        const params = effect.parameters || {};
+        const text = params.text || '';
+        if (!text) continue;
+        
+        const textEl = document.createElement('div');
+        textEl.className = 'overlay-text';
+        
+        const fontSize = params.fontSize || 24;
+        const color = params.color || params.fontColor || '#ffffff';
+        const xPercent = params.x ?? params.positionX ?? 50;
+        const yPercent = params.y ?? params.positionY ?? 50;
+        
+        textEl.textContent = text;
+        textEl.style.fontSize = (fontSize * (video.videoHeight / videoHeight) * 0.5) + 'px';
+        textEl.style.color = color;
+        textEl.style.left = xPercent + '%';
+        textEl.style.top = yPercent + '%';
+        
+        if (effect.textType === 'WATERMARK') {
+          textEl.style.opacity = '0.6';
+        }
+        
+        overlay.appendChild(textEl);
+      }
+    }
+  }
 }
 
 async function loadProject(pid) {
@@ -137,6 +205,7 @@ async function loadProject(pid) {
     renderTracks();
     updateUndoRedoButtons();
     updateVideoPlayerSource();
+    updateTextOverlay();
   } catch (error) {
     console.error('Failed to load project:', error);
   }
@@ -285,10 +354,10 @@ function renderTimeline() {
     marker.style.left = (t * pixelsPerSecond) + 'px';
     
     if (t % 60 === 0) {
-      marker.innerHTML = formatTime(t).slice(0, 5);
+      marker.innerHTML = formatRulerTime(t);
       marker.style.borderLeftWidth = '2px';
     } else if (t % 10 === 0) {
-      marker.innerHTML = formatTime(t).slice(3, 5);
+      marker.innerHTML = formatRulerTime(t);
     }
     
     ruler.appendChild(marker);
@@ -303,6 +372,9 @@ function renderTracks() {
   
   if (!timeline?.tracks) return;
   
+  const contentWidth = duration * pixelsPerSecond + 100;
+  trackList.style.minWidth = contentWidth + 'px';
+  
   timeline.tracks.forEach(track => {
     const trackEl = document.createElement('div');
     trackEl.className = `track ${track.type.toLowerCase()}`;
@@ -316,7 +388,7 @@ function renderTracks() {
         <div class="track-name">${track.name}</div>
       </div>
       <div class="track-content">
-        <div class="clips-container">
+        <div class="clips-container" style="min-width: ${contentWidth}px;">
           ${renderClips(track)}
         </div>
       </div>
@@ -371,6 +443,39 @@ function renderTracks() {
         const clickX = e.clientX - rect.left;
         const time = clickX / pixelsPerSecond;
         seekTo(time);
+      }
+    });
+    
+    trackContent.addEventListener('dragover', (e) => {
+      if (draggedMediaItem) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        trackContent.classList.add('drag-over');
+      }
+    });
+    
+    trackContent.addEventListener('dragleave', (e) => {
+      trackContent.classList.remove('drag-over');
+    });
+    
+    trackContent.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      trackContent.classList.remove('drag-over');
+      
+      if (draggedMediaItem) {
+        const trackEl = trackContent.closest('.track');
+        const trackId = trackEl?.dataset.trackId;
+        if (trackId) {
+          const rect = trackContent.getBoundingClientRect();
+          const dropX = e.clientX - rect.left;
+          const dropTime = Math.max(0, dropX / pixelsPerSecond);
+          
+          currentTime = dropTime;
+          await addVideoToTimeline(draggedMediaItem, trackId);
+          document.getElementById('currentTime').textContent = formatTime(currentTime);
+          updatePlayhead();
+        }
+        draggedMediaItem = null;
       }
     });
   });
@@ -840,15 +945,18 @@ async function addTextOverlay(clipId, textType) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         textType,
-        text: preset.text,
-        fontSize: preset.fontSize,
-        x: preset.x,
-        y: preset.y,
-        color: preset.color,
+        parameters: {
+          text: preset.text,
+          fontSize: preset.fontSize,
+          x: preset.x,
+          y: preset.y,
+          color: preset.color,
+        },
       }),
     });
     await loadProject(projectId);
     updateUndoRedoButtons();
+    updateTextOverlay();
     alert('文字叠加已添加');
   } catch (error) {
     console.error('Failed to add text overlay:', error);
