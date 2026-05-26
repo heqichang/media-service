@@ -137,18 +137,22 @@
         </div>
 
         <div class="timeline-container">
-          <div class="timeline-header">
+          <div class="timeline-left">
             <div class="timeline-controls">
               <button class="btn btn-icon" onclick="zoomIn()">+</button>
               <button class="btn btn-icon" onclick="zoomOut()">-</button>
               <button class="btn btn-icon" onclick="fitToWindow()">⤢</button>
             </div>
-            <div class="ruler" id="timelineRuler"></div>
-            <div class="playhead" id="playhead"></div>
+            <div class="track-headers" id="trackHeaders"></div>
           </div>
-          
-          <div class="tracks-container" id="tracksContainer">
-            <div class="track-list" id="trackList"></div>
+          <div class="timeline-right" id="timelineRight">
+            <div class="timeline-scroll-content" id="timelineScrollContent">
+              <div class="ruler-area">
+                <div class="ruler" id="timelineRuler"></div>
+                <div class="playhead" id="playhead"></div>
+              </div>
+              <div class="tracks-area" id="tracksArea"></div>
+            </div>
           </div>
         </div>
       </main>

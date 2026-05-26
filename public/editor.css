@@ -443,9 +443,10 @@ body {
   justify-content: center;
 }
 
-.preview-container video {
+.preview-wrapper video {
+  display: block;
   max-width: 100%;
-  max-height: 100%;
+  max-height: calc(100vh - 60px - 280px - 40px);
   background: black;
   border-radius: 8px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
@@ -468,6 +469,40 @@ body {
   font-weight: bold;
   text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
   transform: translate(-50%, -50%);
+  pointer-events: auto;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  user-select: none;
+  transition: outline 0.15s;
+}
+
+.text-overlay .overlay-text:hover {
+  outline: 2px dashed #667eea;
+  outline-offset: 2px;
+}
+
+.text-overlay .overlay-text.selected {
+  outline: 2px solid #f5576c;
+  outline-offset: 2px;
+}
+
+.text-overlay .overlay-text.editing {
+  outline: 2px solid #667eea;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.text-overlay .overlay-text.editing input {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  outline: none;
+  text-align: center;
+  padding: 0;
+  margin: 0;
+  width: 100%;
 }
 
 .timeline-container {
@@ -476,15 +511,45 @@ body {
   background: #16213e;
   border-top: 1px solid #0f3460;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   overflow: hidden;
 }
 
-.timeline-header {
+.timeline-left {
+  width: 120px;
+  flex-shrink: 0;
   display: flex;
-  align-items: stretch;
+  flex-direction: column;
+  border-right: 1px solid #0f3460;
+  background: #16213e;
+  z-index: 10;
+}
+
+.timeline-right {
+  flex: 1;
+  overflow: auto;
+  min-width: 0;
+}
+
+.timeline-scroll-content {
+  position: relative;
+  min-width: 100%;
+}
+
+.ruler-area {
+  position: relative;
   height: 40px;
+  background: #0f3460;
   border-bottom: 1px solid #0f3460;
+  flex-shrink: 0;
+}
+
+.track-headers {
+  flex: 1;
+  overflow: hidden;
+}
+
+.tracks-area {
   position: relative;
 }
 
@@ -493,15 +558,48 @@ body {
   align-items: center;
   gap: 4px;
   padding: 0 8px;
-  border-right: 1px solid #0f3460;
-  width: 120px;
+  height: 40px;
+  border-bottom: 1px solid #0f3460;
+  background: #16213e;
+}
+
+.track-header-row {
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  gap: 8px;
+  height: 60px;
+  border-bottom: 1px solid #0f3460;
+  background: #16213e;
+}
+
+.add-track-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  height: 60px;
+  background: #16213e;
+}
+
+.add-track-btn-wrapper {
+  padding: 8px;
+  background: #0f3460;
+  border-bottom: 1px solid #0f3460;
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+}
+
+.add-track-btn-wrapper .add-track-btn {
+  margin: 0 auto;
+  display: block;
 }
 
 .ruler {
-  flex: 1;
   position: relative;
   background: #0f3460;
-  overflow: hidden;
+  height: 100%;
 }
 
 .ruler-marker {
@@ -521,9 +619,10 @@ body {
   bottom: 0;
   width: 2px;
   background: #f5576c;
-  left: 120px;
+  left: 0px;
   pointer-events: none;
   z-index: 100;
+  height: 100%;
 }
 
 .playhead::before {
@@ -538,23 +637,13 @@ body {
   border-top: 8px solid #f5576c;
 }
 
-.tracks-container {
-  flex: 1;
-  overflow: auto;
-  min-height: 0;
-}
-
-.track-list {
-  position: relative;
-  min-width: 100%;
-}
-
 .track {
   display: flex;
   align-items: stretch;
   border-bottom: 1px solid #0f3460;
   min-height: 60px;
   position: relative;
+  height: 60px;
 }
 
 .track-header {

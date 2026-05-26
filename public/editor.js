@@ -136,6 +136,8 @@ function updateTextOverlay() {
   const overlay = document.getElementById('textOverlay');
   if (!overlay) return;
   
+  if (overlay.querySelector('.overlay-text.editing')) return;
+  
   overlay.innerHTML = '';
   
   if (!timeline?.tracks) return;
@@ -143,6 +145,11 @@ function updateTextOverlay() {
   const video = document.getElementById('previewVideo');
   const videoWidth = video?.videoWidth || 1920;
   const videoHeight = video?.videoHeight || 1080;
+  
+  const wrapper = overlay.parentElement;
+  if (wrapper && videoWidth && videoHeight) {
+    wrapper.style.aspectRatio = videoWidth + ' / ' + videoHeight;
+  }
   
   for (const track of timeline.tracks) {
     if (!track.clips) continue;
@@ -168,6 +175,8 @@ function updateTextOverlay() {
         const yPercent = params.y ?? params.positionY ?? 50;
         
         textEl.textContent = text;
+        textEl.dataset.clipId = clip.id;
+        textEl.dataset.effectId = effect.id;
         textEl.style.fontSize = (fontSize * (video.videoHeight / videoHeight) * 0.5) + 'px';
         textEl.style.color = color;
         textEl.style.left = xPercent + '%';
@@ -177,10 +186,73 @@ function updateTextOverlay() {
           textEl.style.opacity = '0.6';
         }
         
+        textEl.addEventListener('click', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          editTextEffect(clip.id, effect.id, textEl);
+        });
+        
         overlay.appendChild(textEl);
       }
     }
   }
+}
+
+function editTextEffect(clipId, effectId, textEl) {
+  const overlay = document.getElementById('textOverlay');
+  overlay.querySelectorAll('.overlay-text.selected').forEach(el => el.classList.remove('selected'));
+  textEl.classList.add('selected');
+  
+  if (textEl.classList.contains('editing')) return;
+  
+  const currentText = textEl.textContent;
+  textEl.classList.add('editing');
+  textEl.textContent = '';
+  
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = currentText;
+  textEl.appendChild(input);
+  input.focus();
+  input.select();
+  
+  const finishEdit = async (save) => {
+    const newText = input.value;
+    textEl.classList.remove('editing');
+    textEl.classList.remove('selected');
+    textEl.innerHTML = '';
+    
+    if (save && newText && newText !== currentText) {
+      try {
+        await fetch(`${API_BASE}/${projectId}/effects/${effectId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            parameters: { text: newText },
+          }),
+        });
+        await loadProject(projectId);
+      } catch (error) {
+        console.error('Failed to update text:', error);
+        textEl.textContent = currentText;
+      }
+    }
+    updateTextOverlay();
+  };
+  
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      finishEdit(true);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      finishEdit(false);
+    }
+  });
+  
+  input.addEventListener('blur', () => {
+    finishEdit(true);
+  });
 }
 
 async function loadProject(pid) {
@@ -314,7 +386,7 @@ function stepForward() {
 
 function updatePlayhead() {
   const playhead = document.getElementById('playhead');
-  const left = 120 + currentTime * pixelsPerSecond;
+  const left = currentTime * pixelsPerSecond;
   playhead.style.left = left + 'px';
 }
 
@@ -367,44 +439,53 @@ function renderTimeline() {
 }
 
 function renderTracks() {
-  const trackList = document.getElementById('trackList');
-  trackList.innerHTML = '';
+  const trackHeadersEl = document.getElementById('trackHeaders');
+  const tracksAreaEl = document.getElementById('tracksArea');
+  const timelineScrollContent = document.getElementById('timelineScrollContent');
+  
+  trackHeadersEl.innerHTML = '';
+  tracksAreaEl.innerHTML = '';
   
   if (!timeline?.tracks) return;
   
   const contentWidth = duration * pixelsPerSecond + 100;
-  trackList.style.minWidth = contentWidth + 'px';
+  timelineScrollContent.style.minWidth = contentWidth + 'px';
   
   timeline.tracks.forEach(track => {
+    const trackIcons = { VIDEO: '🎬', AUDIO: '🎵', SUBTITLE: '📝' };
+    
+    const headerRow = document.createElement('div');
+    headerRow.className = 'track-header-row';
+    headerRow.dataset.trackId = track.id;
+    headerRow.innerHTML = `
+      <div class="track-icon">${trackIcons[track.type] || '📦'}</div>
+      <div class="track-name">${track.name}</div>
+    `;
+    trackHeadersEl.appendChild(headerRow);
+    
     const trackEl = document.createElement('div');
     trackEl.className = `track ${track.type.toLowerCase()}`;
     trackEl.dataset.trackId = track.id;
-    
-    const trackIcons = { VIDEO: '🎬', AUDIO: '🎵', SUBTITLE: '📝' };
-    
     trackEl.innerHTML = `
-      <div class="track-header">
-        <div class="track-icon">${trackIcons[track.type] || '📦'}</div>
-        <div class="track-name">${track.name}</div>
-      </div>
       <div class="track-content">
         <div class="clips-container" style="min-width: ${contentWidth}px;">
           ${renderClips(track)}
         </div>
       </div>
     `;
-    
-    trackList.appendChild(trackEl);
+    tracksAreaEl.appendChild(trackEl);
   });
   
   const addTrackBtn = document.createElement('div');
-  addTrackBtn.className = 'track';
+  addTrackBtn.className = 'add-track-btn-wrapper';
   addTrackBtn.innerHTML = `
-    <div class="track-header" style="justify-content:center;">
-      <button class="add-track-btn" onclick="showAddTrackMenu()">+ 添加轨道</button>
-    </div>
+    <button class="add-track-btn" onclick="showAddTrackMenu()">+ 添加轨道</button>
   `;
-  trackList.appendChild(addTrackBtn);
+  tracksAreaEl.appendChild(addTrackBtn);
+  
+  const addTrackHeader = document.createElement('div');
+  addTrackHeader.className = 'add-track-header';
+  trackHeadersEl.appendChild(addTrackHeader);
   
   document.querySelectorAll('.clip').forEach(clipEl => {
     clipEl.addEventListener('click', (e) => {
@@ -448,9 +529,16 @@ function renderTracks() {
     
     trackContent.addEventListener('dragover', (e) => {
       if (draggedMediaItem) {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'copy';
-        trackContent.classList.add('drag-over');
+        const trackEl = trackContent.closest('.track');
+        const trackId = trackEl?.dataset.trackId;
+        const track = timeline?.tracks?.find(t => t.id === trackId);
+        const mediaItem = findMediaItemById(draggedMediaItem);
+        
+        if (track && mediaItem && isDropAllowed(track.type, mediaItem.type)) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'copy';
+          trackContent.classList.add('drag-over');
+        }
       }
     });
     
@@ -465,13 +553,16 @@ function renderTracks() {
       if (draggedMediaItem) {
         const trackEl = trackContent.closest('.track');
         const trackId = trackEl?.dataset.trackId;
-        if (trackId) {
+        const track = timeline?.tracks?.find(t => t.id === trackId);
+        const mediaItem = findMediaItemById(draggedMediaItem);
+        
+        if (track && mediaItem && isDropAllowed(track.type, mediaItem.type)) {
           const rect = trackContent.getBoundingClientRect();
           const dropX = e.clientX - rect.left;
           const dropTime = Math.max(0, dropX / pixelsPerSecond);
           
           currentTime = dropTime;
-          await addVideoToTimeline(draggedMediaItem, trackId);
+          await addMediaToTimeline(draggedMediaItem, trackId);
           document.getElementById('currentTime').textContent = formatTime(currentTime);
           updatePlayhead();
         }
@@ -479,6 +570,35 @@ function renderTracks() {
       }
     });
   });
+}
+
+function findMediaItemById(id) {
+  return mediaItems.find(m => m.id === id);
+}
+
+function isDropAllowed(trackType, mediaType) {
+  if (trackType === 'VIDEO' && mediaType === 'video') return true;
+  if (trackType === 'VIDEO' && mediaType === 'audio') return true;
+  if (trackType === 'AUDIO' && mediaType === 'audio') return true;
+  if (trackType === 'SUBTITLE' && mediaType === 'subtitle') return true;
+  return false;
+}
+
+async function addMediaToTimeline(mediaId, trackId) {
+  if (!projectId) return;
+  const mediaItem = findMediaItemById(mediaId);
+  
+  try {
+    await fetch(`${API_BASE}/${projectId}/tracks/${trackId}/clips/add-video`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ videoId: mediaId, startTime: currentTime }),
+    });
+    await loadProject(projectId);
+    updateUndoRedoButtons();
+  } catch (error) {
+    console.error('Failed to add media to timeline:', error);
+  }
 }
 
 function renderClips(track) {
@@ -703,6 +823,7 @@ function endClipResize() {
 }
 
 let draggedMediaItem = null;
+let mediaItems = [];
 
 function initDragDrop() {
   const uploadArea = document.getElementById('uploadArea');
@@ -773,11 +894,26 @@ function addMediaItem(media) {
   item.draggable = true;
   item.dataset.videoId = media.id;
   
+  let mediaType = media.type;
+  if (!mediaType) {
+    if (media.originalName) {
+      const ext = media.originalName.split('.').pop().toLowerCase();
+      if (['mp3', 'wav', 'aac', 'ogg', 'flac', 'm4a'].includes(ext)) mediaType = 'audio';
+      else mediaType = 'video';
+    } else {
+      mediaType = 'video';
+    }
+  }
+  item.dataset.mediaType = mediaType;
+  media.type = mediaType;
+  
+  mediaItems.push(media);
+  
   const name = escapeHtml(media.originalName || media.name || '未命名');
   
   item.innerHTML = `
     ${media.thumbnailUrl ? `<img src="${media.thumbnailUrl}" alt="">` : 
-      media.type === 'audio' ? '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:24px;">🎵</div>' :
+      mediaType === 'audio' ? '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:24px;">🎵</div>' :
       '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:24px;">🎬</div>'}
     <div class="media-name">${name}</div>
   `;
@@ -791,6 +927,11 @@ function addMediaItem(media) {
   item.addEventListener('dragstart', (e) => {
     draggedMediaItem = media.id;
     e.dataTransfer.effectAllowed = 'copy';
+    e.dataTransfer.setData('text/plain', media.id);
+  });
+  
+  item.addEventListener('dragend', () => {
+    draggedMediaItem = null;
   });
   
   mediaList.appendChild(item);
