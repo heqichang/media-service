@@ -18,7 +18,16 @@ const simpleStorage = multer.diskStorage({
     cb(null, tempDir);
   },
   filename: (req, file, cb) => {
-    cb(null, uuidv4() + '-' + file.originalname);
+    let originalName = file.originalname;
+    try {
+      if (/[^\x00-\x7F]/.test(originalName)) {
+        originalName = Buffer.from(originalName, 'latin1').toString('utf8');
+      }
+    } catch (e) {}
+    const ext = path.extname(originalName);
+    const safeName = uuidv4() + ext;
+    file.originalname = originalName;
+    cb(null, safeName);
   },
 });
 

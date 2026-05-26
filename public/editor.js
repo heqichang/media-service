@@ -90,11 +90,19 @@ function initVideoPlayerSync() {
   if (!video) return;
   
   video.addEventListener('timeupdate', () => {
-    if (!isPlaying) {
-      currentTime = video.currentTime;
-      document.getElementById('currentTime').textContent = formatTime(currentTime);
-      updatePlayhead();
-    }
+    currentTime = video.currentTime;
+    document.getElementById('currentTime').textContent = formatTime(currentTime);
+    updatePlayhead();
+  });
+  
+  video.addEventListener('play', () => {
+    isPlaying = true;
+    document.getElementById('playBtn').textContent = '⏸';
+  });
+  
+  video.addEventListener('pause', () => {
+    isPlaying = false;
+    document.getElementById('playBtn').textContent = '▶';
   });
   
   video.addEventListener('ended', () => {

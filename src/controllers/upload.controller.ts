@@ -282,6 +282,13 @@ export class UploadController {
         return errorResponse(res, 'No file uploaded', 400);
       }
 
+      let originalName = req.file.originalname;
+      try {
+        if (/[^\x00-\x7F]/.test(originalName)) {
+          originalName = Buffer.from(originalName, 'latin1').toString('utf8');
+        }
+      } catch (e) {}
+
       const uploadId = uuidv4();
       const uploadDir = path.join(config.upload.tempDir, uploadId);
       
@@ -289,7 +296,6 @@ export class UploadController {
         fs.mkdirSync(uploadDir, { recursive: true });
       }
 
-      const originalName = req.file.originalname;
       const ext = path.extname(originalName);
       const safeName = uuidv4() + ext;
       const finalPath = path.join(uploadDir, safeName);
