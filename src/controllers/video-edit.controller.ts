@@ -11,15 +11,16 @@ import prisma from '../config/prisma';
 export class VideoEditController {
   static async createProject(req: Request, res: Response) {
     try {
-      const { title, description, videoId, width, height, fps } = req.body;
+      const { name, title, description, videoId, width, height, fps } = req.body;
       const userId = (req as any).userId;
+      const projectName = name || title;
 
-      if (!title) {
-        return errorResponse(res, 'Title is required', 400);
+      if (!projectName) {
+        return errorResponse(res, 'Name is required', 400);
       }
 
       const project = await videoEditService.createProject(
-        { title, description, videoId, width, height, fps },
+        { name: projectName, description, videoId, width, height, fps },
         userId
       );
 
@@ -61,10 +62,10 @@ export class VideoEditController {
   static async updateProject(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      const { title, description, thumbnailUrl, width, height, fps } = req.body;
+      const { name, title, description, thumbnailUrl, width, height, fps } = req.body;
 
       const project = await videoEditService.updateProject(id, {
-        title,
+        name: name || title,
         description,
         thumbnailUrl,
         width,

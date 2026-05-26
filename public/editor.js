@@ -572,6 +572,13 @@ async function handleFiles(files) {
   }
 }
 
+function escapeHtml(str) {
+  if (!str) return '';
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
 function addMediaItem(media) {
   const mediaList = document.getElementById('mediaList');
   const item = document.createElement('div');
@@ -579,11 +586,13 @@ function addMediaItem(media) {
   item.draggable = true;
   item.dataset.videoId = media.id;
   
+  const name = escapeHtml(media.originalName || media.name || '未命名');
+  
   item.innerHTML = `
     ${media.thumbnailUrl ? `<img src="${media.thumbnailUrl}" alt="">` : 
       media.type === 'audio' ? '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:24px;">🎵</div>' :
       '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:24px;">🎬</div>'}
-    <div class="media-name">${media.originalName || media.name}</div>
+    <div class="media-name">${name}</div>
   `;
   
   item.addEventListener('dblclick', async () => {

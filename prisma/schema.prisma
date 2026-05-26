@@ -169,7 +169,7 @@ enum ExportStatus {
 
 model VideoEditProject {
   id          String    @id @default(uuid())
-  title       String
+  name        String
   description String?
   videoId     String?
   video       Video?    @relation(fields: [videoId], references: [id])

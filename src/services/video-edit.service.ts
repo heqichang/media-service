@@ -36,7 +36,7 @@ export class VideoEditService extends EventEmitter {
 
     const project = await prisma.videoEditProject.create({
       data: {
-        title: request.title,
+        name: request.name,
         description: request.description,
         videoId: request.videoId,
         userId,
@@ -148,7 +148,7 @@ export class VideoEditService extends EventEmitter {
     const project = await prisma.videoEditProject.update({
       where: { id: projectId },
       data: {
-        title: request.title,
+        name: request.name,
         description: request.description,
         thumbnailUrl: request.thumbnailUrl,
         width: request.width,
@@ -524,7 +524,7 @@ export class VideoEditService extends EventEmitter {
     if (!original) throw new Error('Project not found');
 
     const newProject = await this.createProject({
-      title: newTitle,
+      name: newTitle,
       description: original.description || undefined,
       width: original.width,
       height: original.height,

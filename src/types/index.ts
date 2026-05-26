@@ -180,7 +180,7 @@ export interface PlayAuthResult {
 }
 
 export interface CreateProjectRequest {
-  title: string;
+  name: string;
   description?: string;
   videoId?: string;
   width?: number;
@@ -189,7 +189,7 @@ export interface CreateProjectRequest {
 }
 
 export interface UpdateProjectRequest {
-  title?: string;
+  name?: string;
   description?: string;
   thumbnailUrl?: string;
   width?: number;

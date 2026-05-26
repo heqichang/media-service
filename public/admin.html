@@ -51,6 +51,9 @@
                 <a class="nav-item" data-tab="live-gifts">
                     <span class="nav-icon">🎁</span><span>礼物管理</span>
                 </a>
+                <a class="nav-item" data-tab="video-edit">
+                    <span class="nav-icon">✂️</span><span>视频剪辑</span>
+                </a>
             </nav>
 
             <div class="sidebar-footer">
@@ -470,6 +473,37 @@
                                     </tr>
                                 </thead>
                                 <tbody><tr><td colspan="6" class="empty">加载中...</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="content">
+                <div class="tab-pane" id="tab-video-edit">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>视频剪辑项目</h3>
+                            <div class="card-actions">
+                                <button class="btn btn-primary" id="newEditProjectBtn">+ 新建剪辑项目</button>
+                                <button class="btn btn-ghost" id="openEditorBtn">🎬 打开编辑器</button>
+                            </div>
+                        </div>
+                        <div class="table-wrapper">
+                            <table class="table" id="editProjectsTable">
+                                <thead>
+                                    <tr>
+                                        <th>项目名称</th>
+                                        <th>分辨率</th>
+                                        <th>帧率</th>
+                                        <th>时长</th>
+                                        <th>轨道数</th>
+                                        <th>创建时间</th>
+                                        <th>更新时间</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody><tr><td colspan="8" class="empty">加载中...</td></tr></tbody>
                             </table>
                         </div>
                     </div>

@@ -173,6 +173,7 @@
             dashboard: '概览', videos: '视频管理', upload: '上传视频',
             templates: '转码模板', categories: '分类管理', tags: '标签管理', storage: '存储管理',
             'live-rooms': '直播间管理', 'live-transcodes': '转码管理', 'live-recordings': '录制管理', 'live-gifts': '礼物管理',
+            'video-edit': '视频剪辑',
         };
         $('#breadcrumb').textContent = titles[tab] || '';
         if (tab === 'dashboard') loadDashboard();
@@ -185,6 +186,7 @@
         if (tab === 'live-transcodes') loadTranscodes();
         if (tab === 'live-recordings') loadRecordings();
         if (tab === 'live-gifts') loadGifts();
+        if (tab === 'video-edit') loadEditProjects();
     }
 
     async function loadDashboard() {
@@ -294,6 +296,7 @@
                             <button class="action-btn" data-action="edit">编辑</button>
                             <button class="action-btn" data-action="transcode">转码</button>
                             <button class="action-btn" data-action="thumb">截图</button>
+                            <button class="action-btn" data-action="edit-video" style="background:linear-gradient(135deg,#667eea,#764ba2);color:white;">✂️ 剪辑</button>
                             ${v.status === 'TRANSCODED' ? '<button class="action-btn primary" data-action="publish">发布</button>' : ''}
                             <button class="action-btn danger" data-action="delete">删除</button>
                         </div>
@@ -1901,12 +1904,18 @@
 
             else if (action === 'edit-gift') editGift(id);
             else if (action === 'toggle-gift') toggleGift(id);
+
+            else if (action === 'edit-video') editVideoWithClip(id);
+            else if (action === 'edit-project') openEditProject(id);
+            else if (action === 'delete-project') deleteEditProject(id);
         });
 
         $('#refreshBtn').addEventListener('click', () => switchTab(STATE.currentTab));
         $('#newUploadBtn').addEventListener('click', () => switchTab('upload'));
         $('#newLiveRoomBtn').addEventListener('click', createLiveRoom);
         $('#newGiftBtn').addEventListener('click', createGift);
+        $('#newEditProjectBtn').addEventListener('click', createEditProject);
+        $('#openEditorBtn').addEventListener('click', () => window.open('/editor', '_blank'));
         $('#videoSearch').addEventListener('input', debounce((e) => {
             STATE.videos.filters.search = e.target.value;
             STATE.videos.page = 1;
@@ -1982,6 +1991,114 @@
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') modal.close();
         });
+    }
+
+    async function editVideoWithClip(videoId) {
+        try {
+            const video = STATE.videos.items.find(v => v.id === videoId);
+            if (!video) {
+                toast.error('未找到视频');
+                return;
+            }
+            
+            const res = await api.post('/video-edit', {
+                name: `剪辑 - ${video.title}`,
+                width: video.width || 1920,
+                height: video.height || 1080,
+                fps: 30,
+            });
+            
+            const projectId = res.data.id;
+            
+            const videoTracks = await api.get(`/video-edit/${projectId}/timeline`);
+            const tracks = videoTracks.data.tracks || [];
+            let videoTrack = tracks.find(t => t.type === 'VIDEO');
+            
+            if (!videoTrack) {
+                const trackRes = await api.post(`/video-edit/${projectId}/tracks`, {
+                    type: 'VIDEO',
+                    name: '视频轨 1',
+                });
+                videoTrack = trackRes.data;
+            }
+            
+            await api.post(`/video-edit/${projectId}/tracks/${videoTrack.id}/clips/add-video`, {
+                videoId,
+                startTime: 0,
+            });
+            
+            toast.success('剪辑项目创建成功，正在打开编辑器...');
+            setTimeout(() => {
+                window.open(`/editor/${projectId}`, '_blank');
+            }, 500);
+        } catch (err) {
+            toast.error('创建剪辑项目失败: ' + err.message);
+        }
+    }
+
+    async function createEditProject() {
+        try {
+            const res = await api.post('/video-edit', {
+                name: '新建剪辑项目',
+                width: 1920,
+                height: 1080,
+                fps: 30,
+            });
+            toast.success('剪辑项目创建成功');
+            loadEditProjects();
+        } catch (err) {
+            toast.error('创建剪辑项目失败: ' + err.message);
+        }
+    }
+
+    async function loadEditProjects() {
+        try {
+            const res = await api.get('/video-edit');
+            const projects = res.data || [];
+            renderEditProjectsTable(projects);
+        } catch (err) {
+            $('#editProjectsTable tbody').innerHTML = '<tr><td colspan="8" class="empty">加载失败</td></tr>';
+        }
+    }
+
+    function renderEditProjectsTable(projects) {
+        const rows = projects.map(p => {
+            const trackCount = p.timeline?.tracks?.length || 0;
+            const duration = p.timeline?.duration || 0;
+            return `
+                <tr data-id="${p.id}">
+                    <td><strong>${escapeHtml(p.name)}</strong></td>
+                    <td>${p.width}x${p.height}</td>
+                    <td>${p.fps} fps</td>
+                    <td>${fmtDuration(duration)}</td>
+                    <td>${trackCount}</td>
+                    <td style="white-space:nowrap;">${fmtDate(p.createdAt)}</td>
+                    <td style="white-space:nowrap;">${fmtDate(p.updatedAt)}</td>
+                    <td>
+                        <div class="action-group">
+                            <button class="action-btn primary" data-action="edit-project" data-id="${p.id}">编辑</button>
+                            <button class="action-btn danger" data-action="delete-project" data-id="${p.id}">删除</button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+        $('#editProjectsTable tbody').innerHTML = rows || '<tr><td colspan="8" class="empty">暂无剪辑项目</td></tr>';
+    }
+
+    function openEditProject(projectId) {
+        window.open(`/editor/${projectId}`, '_blank');
+    }
+
+    async function deleteEditProject(projectId) {
+        if (!await modal.confirm('确定要删除这个剪辑项目吗？此操作不可恢复。')) return;
+        try {
+            await api.delete(`/video-edit/${projectId}`);
+            toast.success('剪辑项目已删除');
+            loadEditProjects();
+        } catch (err) {
+            toast.error('删除失败: ' + err.message);
+        }
     }
 
     function debounce(fn, wait) {

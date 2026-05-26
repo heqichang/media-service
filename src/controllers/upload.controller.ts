@@ -275,4 +275,57 @@ export class UploadController {
       errorResponse(res, error.message, 500);
     }
   }
+
+  static async simpleUpload(req: Request, res: Response) {
+    try {
+      if (!req.file) {
+        return errorResponse(res, 'No file uploaded', 400);
+      }
+
+      const uploadId = uuidv4();
+      const uploadDir = path.join(config.upload.tempDir, uploadId);
+      
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+
+      const originalName = req.file.originalname;
+      const finalPath = path.join(uploadDir, originalName);
+      
+      fs.renameSync(req.file.path, finalPath);
+
+      const fileSize = fs.statSync(finalPath).size;
+
+      const video = await prisma.video.create({
+        data: {
+          title: originalName,
+          fileName: originalName,
+          originalPath: `${uploadId}/${originalName}`,
+          fileSize: BigInt(fileSize),
+          status: VideoStatus.UPLOADED,
+          uploadId,
+          uploadProgress: 100,
+        },
+      });
+
+      successResponse(
+        res,
+        {
+          id: video.id,
+          uploadId,
+          videoId: video.id,
+          filePath: finalPath,
+          fileName: originalName,
+          fileSize,
+          originalName,
+          thumbnailUrl: null,
+          name: originalName,
+          type: 'video',
+        },
+        'File uploaded successfully'
+      );
+    } catch (error: any) {
+      errorResponse(res, error.message, 500);
+    }
+  }
 }
