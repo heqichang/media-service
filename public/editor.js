@@ -75,99 +75,100 @@ function sourcePathToUrl(sourcePath) {
 }
 
 function updateVideoPlayerSource() {
-  const video = document.getElementById('previewVideo');
-  if (!video) return;
+  const compositionLayer = document.getElementById('compositionLayer');
+  if (!compositionLayer) return;
   
   if (!timeline?.tracks) return;
   
-  let firstVideoClip = null;
-  for (const track of timeline.tracks) {
-    if (track.type === 'VIDEO' && track.clips?.length > 0) {
-      firstVideoClip = track.clips[0];
-      break;
-    }
+  const baseWidth = project?.width || 1920;
+  const baseHeight = project?.height || 1080;
+  const wrapper = document.getElementById('previewWrapper');
+  if (wrapper) {
+    wrapper.style.aspectRatio = baseWidth + ' / ' + baseHeight;
+    const paddingTop = (baseHeight / baseWidth) * 100;
+    wrapper.style.setProperty('--aspect-padding', paddingTop + '%');
   }
   
-  if (firstVideoClip?.sourcePath) {
-    const url = sourcePathToUrl(firstVideoClip.sourcePath);
-    if (video.src !== url) {
-      video.src = url;
-      video.load();
-    }
-  }
-}
-
-function initVideoPlayerSync() {
-  const video = document.getElementById('previewVideo');
-  if (!video) return;
-  
-  video.addEventListener('timeupdate', () => {
-    currentTime = video.currentTime;
-    document.getElementById('currentTime').textContent = formatTime(currentTime);
-    updatePlayhead();
-    updateTextOverlay();
-  });
-  
-  video.addEventListener('play', () => {
-    isPlaying = true;
-    document.getElementById('playBtn').textContent = '⏸';
-  });
-  
-  video.addEventListener('pause', () => {
-    isPlaying = false;
-    document.getElementById('playBtn').textContent = '▶';
-  });
-  
-  video.addEventListener('ended', () => {
-    isPlaying = false;
-    document.getElementById('playBtn').textContent = '▶';
-  });
-  
-  video.addEventListener('loadedmetadata', () => {
-    updateTextOverlay();
-  });
-  
-  video.addEventListener('error', (e) => {
-    console.error('Video playback error:', e);
-  });
-}
-
-function updateTextOverlay() {
-  const overlay = document.getElementById('textOverlay');
-  if (!overlay) return;
-  
-  if (overlay.querySelector('.overlay-text.editing')) return;
-  
-  overlay.innerHTML = '';
-  
-  if (!timeline?.tracks) return;
-  
-  const video = document.getElementById('previewVideo');
-  const videoWidth = video?.videoWidth || 1920;
-  const videoHeight = video?.videoHeight || 1080;
-  
-  const wrapper = overlay.parentElement;
-  if (wrapper && videoWidth && videoHeight) {
-    wrapper.style.aspectRatio = videoWidth + ' / ' + videoHeight;
-  }
-  
-  for (const track of timeline.tracks) {
+  const allClips = [];
+  for (let trackIdx = 0; trackIdx < timeline.tracks.length; trackIdx++) {
+    const track = timeline.tracks[trackIdx];
     if (!track.clips) continue;
     
     for (const clip of track.clips) {
-      if (currentTime < clip.startTime || currentTime > clip.endTime) continue;
-      
-      if (!clip.effects) continue;
-      
+      allClips.push({ track, clip, trackIdx });
+    }
+  }
+  
+  allClips.sort((a, b) => a.clip.startTime - b.clip.startTime);
+  
+  compositionLayer.innerHTML = '';
+  
+  for (const { clip, track, trackIdx } of allClips) {
+    if (!clip.sourcePath) continue;
+    
+    const url = sourcePathToUrl(clip.sourcePath);
+    const mediaType = clip.sourceType || 'video';
+    
+    let mediaEl;
+    if (mediaType === 'image') {
+      mediaEl = document.createElement('img');
+      mediaEl.src = url;
+      mediaEl.crossOrigin = 'anonymous';
+    } else {
+      mediaEl = document.createElement('video');
+      mediaEl.src = url;
+      mediaEl.crossOrigin = 'anonymous';
+      mediaEl.preload = 'auto';
+      mediaEl.muted = track.type === 'AUDIO' ? false : (trackIdx !== 0);
+      mediaEl.volume = clip.volume !== undefined ? clip.volume : 1;
+    }
+    
+    mediaEl.dataset.clipId = clip.id;
+    mediaEl.dataset.startTime = clip.startTime;
+    mediaEl.dataset.endTime = clip.endTime;
+    mediaEl.dataset.sourceIn = clip.sourceIn || 0;
+    mediaEl.dataset.sourceOut = clip.sourceOut || clip.duration;
+    mediaEl.dataset.trackIndex = trackIdx;
+    
+    const zIndex = (timeline.tracks.length - trackIdx) * 10;
+    mediaEl.style.zIndex = zIndex;
+    
+    const opacity = clip.opacity !== undefined ? clip.opacity : 1;
+    const scale = clip.scale !== undefined ? clip.scale : 1;
+    const posX = clip.positionX !== undefined ? clip.positionX : 0;
+    const posY = clip.positionY !== undefined ? clip.positionY : 0;
+    const rotation = clip.rotation !== undefined ? clip.rotation : 0;
+    
+    mediaEl.style.opacity = opacity;
+    mediaEl.style.transform = `translate(${posX}px, ${posY}px) scale(${scale}) rotate(${rotation}deg)`;
+    mediaEl.style.display = currentTime >= clip.startTime && currentTime <= clip.endTime ? 'block' : 'none';
+    
+    if (mediaType === 'video') {
+      mediaEl.addEventListener('loadedmetadata', () => {
+        syncVideoToCurrentTime(mediaEl);
+      });
+      mediaEl.addEventListener('error', (e) => {
+        console.error('Video load error:', url, e);
+      });
+    }
+    
+    compositionLayer.appendChild(mediaEl);
+    
+    if (clip.effects) {
       for (const effect of clip.effects) {
         if (effect.type !== 'TEXT') continue;
-        
         const params = effect.parameters || {};
         const text = params.text || '';
         if (!text) continue;
         
         const textEl = document.createElement('div');
-        textEl.className = 'overlay-text';
+        textEl.className = 'composition-text';
+        textEl.dataset.clipId = clip.id;
+        textEl.dataset.effectId = effect.id;
+        textEl.dataset.startTime = clip.startTime;
+        textEl.dataset.endTime = clip.endTime;
+        textEl.dataset.trackIndex = trackIdx;
+        textEl.dataset.textType = effect.textType || 'TITLE';
         
         const fontSize = params.fontSize || 24;
         const color = params.color || params.fontColor || '#ffffff';
@@ -175,32 +176,305 @@ function updateTextOverlay() {
         const yPercent = params.y ?? params.positionY ?? 50;
         
         textEl.textContent = text;
-        textEl.dataset.clipId = clip.id;
-        textEl.dataset.effectId = effect.id;
-        textEl.style.fontSize = (fontSize * (video.videoHeight / videoHeight) * 0.5) + 'px';
+        textEl.style.fontSize = fontSize + 'px';
         textEl.style.color = color;
         textEl.style.left = xPercent + '%';
         textEl.style.top = yPercent + '%';
+        textEl.style.zIndex = zIndex + 5;
         
         if (effect.textType === 'WATERMARK') {
           textEl.style.opacity = '0.6';
         }
         
-        textEl.addEventListener('click', (e) => {
-          e.stopPropagation();
-          e.preventDefault();
-          editTextEffect(clip.id, effect.id, textEl);
-        });
+        textEl.style.display = currentTime >= clip.startTime && currentTime <= clip.endTime ? 'block' : 'none';
         
-        overlay.appendChild(textEl);
+        compositionLayer.appendChild(textEl);
       }
+    }
+  }
+  
+  const allVideos = compositionLayer.querySelectorAll('video');
+  if (allVideos.length > 0) {
+    const baseVideo = allVideos[0];
+    if (baseVideo) {
+      baseVideo.addEventListener('timeupdate', () => {
+        currentTime = baseVideo.currentTime;
+        document.getElementById('currentTime').textContent = formatTime(currentTime);
+        updatePlayhead();
+        updateMediaVisibility();
+        updateTextOverlay();
+      });
+      
+      baseVideo.addEventListener('play', () => {
+        isPlaying = true;
+        document.getElementById('playBtn').textContent = '⏸';
+        syncAllVideos('play');
+      });
+      
+      baseVideo.addEventListener('pause', () => {
+        isPlaying = false;
+        document.getElementById('playBtn').textContent = '▶';
+        syncAllVideos('pause');
+      });
+      
+      baseVideo.addEventListener('ended', () => {
+        isPlaying = false;
+        document.getElementById('playBtn').textContent = '▶';
+        syncAllVideos('pause');
+      });
     }
   }
 }
 
+function syncVideoToCurrentTime(videoEl) {
+  const startTime = parseFloat(videoEl.dataset.startTime);
+  const sourceIn = parseFloat(videoEl.dataset.sourceIn);
+  const clipTime = currentTime - startTime + sourceIn;
+  if (videoEl.readyState >= 1 && !isNaN(clipTime)) {
+    try {
+      videoEl.currentTime = Math.max(0, clipTime);
+    } catch (e) {
+    }
+  }
+}
+
+function syncAllVideos(action) {
+  const compositionLayer = document.getElementById('compositionLayer');
+  if (!compositionLayer) return;
+  
+  const allVideos = compositionLayer.querySelectorAll('video');
+  allVideos.forEach((video, idx) => {
+    if (idx === 0) return;
+    try {
+      if (action === 'play') {
+        video.play().catch(() => {});
+      } else if (action === 'pause') {
+        video.pause();
+      }
+    } catch (e) {
+    }
+  });
+  
+  updateMediaVisibility();
+}
+
+function updateMediaVisibility() {
+  const compositionLayer = document.getElementById('compositionLayer');
+  if (!compositionLayer) return;
+  
+  const allMedia = compositionLayer.querySelectorAll('video, img, .composition-text');
+  allMedia.forEach(media => {
+    const startTime = parseFloat(media.dataset.startTime);
+    const endTime = parseFloat(media.dataset.endTime);
+    const isVisible = currentTime >= startTime && currentTime <= endTime;
+    media.style.display = isVisible ? 'block' : 'none';
+    
+    if (media.tagName === 'VIDEO' && isVisible) {
+      syncVideoToCurrentTime(media);
+    }
+  });
+  
+  attachTextInteractionHandlers();
+}
+
+function getBaseVideo() {
+  const compositionLayer = document.getElementById('compositionLayer');
+  if (!compositionLayer) return null;
+  return compositionLayer.querySelector('video');
+}
+
+function initVideoPlayerSync() {
+}
+
+function updateTextOverlay() {
+  const compositionLayer = document.getElementById('compositionLayer');
+  if (!compositionLayer) return;
+  
+  attachTextInteractionHandlers();
+}
+
+function attachTextInteractionHandlers() {
+  const compositionLayer = document.getElementById('compositionLayer');
+  if (!compositionLayer) return;
+  
+  const textEls = compositionLayer.querySelectorAll('.composition-text');
+  
+  textEls.forEach(textEl => {
+    if (textEl.dataset.handlersAttached === 'true') return;
+    textEl.dataset.handlersAttached = 'true';
+    
+    const clipId = textEl.dataset.clipId;
+    const effectId = textEl.dataset.effectId;
+    
+    if (!effectId) return;
+    
+    const resizeHandle = document.createElement('div');
+    resizeHandle.className = 'resize-handle se';
+    textEl.appendChild(resizeHandle);
+    
+    textEl.addEventListener('mousedown', (e) => {
+      if (e.target.classList.contains('resize-handle')) return;
+      if (textEl.classList.contains('editing')) return;
+      
+      e.preventDefault();
+      e.stopPropagation();
+      
+      compositionLayer.querySelectorAll('.composition-text.selected').forEach(el => el.classList.remove('selected'));
+      textEl.classList.add('selected');
+      
+      isDraggingText = true;
+      activeTextEl = textEl;
+      activeTextClipId = clipId;
+      activeTextEffectId = effectId;
+      textDragStartX = e.clientX;
+      textDragStartY = e.clientY;
+      
+      const leftStr = textEl.style.left;
+      const topStr = textEl.style.top;
+      textStartX = parseFloat(leftStr) || 50;
+      textStartY = parseFloat(topStr) || 50;
+      
+      document.addEventListener('mousemove', handleTextDrag);
+      document.addEventListener('mouseup', handleTextDragEnd);
+    });
+    
+    resizeHandle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      isResizingText = true;
+      activeTextEl = textEl;
+      activeTextClipId = clipId;
+      activeTextEffectId = effectId;
+      textDragStartX = e.clientX;
+      textDragStartY = e.clientY;
+      
+      const fontSizeStr = textEl.style.fontSize;
+      textStartFontSize = parseFloat(fontSizeStr) || 24;
+      
+      document.addEventListener('mousemove', handleTextResize);
+      document.addEventListener('mouseup', handleTextResizeEnd);
+    });
+    
+    textEl.addEventListener('click', (e) => {
+      if (e.target.classList.contains('resize-handle')) return;
+      if (isDraggingText || isResizingText) return;
+      e.stopPropagation();
+      e.preventDefault();
+      
+      const wasSelected = textEl.classList.contains('selected');
+      compositionLayer.querySelectorAll('.composition-text.selected').forEach(el => el.classList.remove('selected'));
+      
+      if (wasSelected) {
+        editTextEffect(clipId, effectId, textEl);
+      } else {
+        textEl.classList.add('selected');
+      }
+    });
+  });
+}
+
+function handleTextDrag(e) {
+  if (!isDraggingText || !activeTextEl) return;
+  
+  const wrapper = document.getElementById('previewWrapper');
+  const rect = wrapper.getBoundingClientRect();
+  
+  const deltaX = e.clientX - textDragStartX;
+  const deltaY = e.clientY - textDragStartY;
+  
+  const deltaXPercent = (deltaX / rect.width) * 100;
+  const deltaYPercent = (deltaY / rect.height) * 100;
+  
+  const newX = Math.max(0, Math.min(100, textStartX + deltaXPercent));
+  const newY = Math.max(0, Math.min(100, textStartY + deltaYPercent));
+  
+  activeTextEl.style.left = newX + '%';
+  activeTextEl.style.top = newY + '%';
+}
+
+async function handleTextDragEnd() {
+  if (!isDraggingText) return;
+  
+  isDraggingText = false;
+  document.removeEventListener('mousemove', handleTextDrag);
+  document.removeEventListener('mouseup', handleTextDragEnd);
+  
+  if (!activeTextEl || !activeTextEffectId || !activeTextClipId) return;
+  
+  const wrapper = document.getElementById('previewWrapper');
+  const rect = wrapper.getBoundingClientRect();
+  const deltaX = (event.clientX - textDragStartX) / rect.width * 100;
+  const deltaY = (event.clientY - textDragStartY) / rect.height * 100;
+  
+  const newX = Math.max(0, Math.min(100, textStartX + deltaX));
+  const newY = Math.max(0, Math.min(100, textStartY + deltaY));
+  
+  if (Math.abs(newX - textStartX) > 0.01 || Math.abs(newY - textStartY) > 0.01) {
+    try {
+      await fetch(`${API_BASE}/${projectId}/effects/${activeTextEffectId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          parameters: { x: newX, y: newY },
+        }),
+      });
+      await loadProject(projectId);
+    } catch (error) {
+      console.error('Failed to update text position:', error);
+    }
+  }
+  
+  activeTextEl = null;
+  activeTextClipId = null;
+  activeTextEffectId = null;
+}
+
+function handleTextResize(e) {
+  if (!isResizingText || !activeTextEl) return;
+  
+  const deltaY = e.clientY - textDragStartY;
+  const scaleFactor = 1 + deltaY / 100;
+  const newFontSize = Math.max(8, Math.min(200, textStartFontSize * scaleFactor));
+  
+  activeTextEl.style.fontSize = newFontSize + 'px';
+}
+
+async function handleTextResizeEnd() {
+  if (!isResizingText) return;
+  
+  isResizingText = false;
+  document.removeEventListener('mousemove', handleTextResize);
+  document.removeEventListener('mouseup', handleTextResizeEnd);
+  
+  if (!activeTextEl || !activeTextEffectId) return;
+  
+  const deltaY = (event.clientY - textDragStartY) / 100;
+  const newFontSize = Math.max(8, Math.min(200, textStartFontSize * (1 + deltaY)));
+  
+  if (Math.abs(newFontSize - textStartFontSize) > 0.1) {
+    try {
+      await fetch(`${API_BASE}/${projectId}/effects/${activeTextEffectId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          parameters: { fontSize: newFontSize },
+        }),
+      });
+      await loadProject(projectId);
+    } catch (error) {
+      console.error('Failed to update text size:', error);
+    }
+  }
+  
+  activeTextEl = null;
+  activeTextClipId = null;
+  activeTextEffectId = null;
+}
+
 function editTextEffect(clipId, effectId, textEl) {
-  const overlay = document.getElementById('textOverlay');
-  overlay.querySelectorAll('.overlay-text.selected').forEach(el => el.classList.remove('selected'));
+  const compositionLayer = document.getElementById('compositionLayer');
+  compositionLayer.querySelectorAll('.composition-text.selected').forEach(el => el.classList.remove('selected'));
   textEl.classList.add('selected');
   
   if (textEl.classList.contains('editing')) return;
@@ -329,24 +603,26 @@ function seekTo(time) {
   document.getElementById('currentTime').textContent = formatTime(currentTime);
   updatePlayhead();
   
-  const video = document.getElementById('previewVideo');
-  if (video && !isNaN(video.duration) && Math.abs(video.currentTime - currentTime) > 0.1) {
-    video.currentTime = currentTime;
+  const baseVideo = getBaseVideo();
+  if (baseVideo && !isNaN(baseVideo.duration)) {
+    try {
+      baseVideo.currentTime = currentTime;
+    } catch (e) {
+    }
   }
+  
+  updateMediaVisibility();
+  updateTextOverlay();
 }
 
 function togglePlay() {
-  const video = document.getElementById('previewVideo');
+  const baseVideo = getBaseVideo();
   
-  if (video && video.src) {
+  if (baseVideo && baseVideo.src) {
     if (isPlaying) {
-      video.pause();
-      isPlaying = false;
-      document.getElementById('playBtn').textContent = '▶';
+      baseVideo.pause();
     } else {
-      video.play().catch(e => console.error('Play failed:', e));
-      isPlaying = true;
-      document.getElementById('playBtn').textContent = '⏸';
+      baseVideo.play().catch(e => console.error('Play failed:', e));
     }
   } else {
     isPlaying = !isPlaying;
@@ -824,6 +1100,16 @@ function endClipResize() {
 
 let draggedMediaItem = null;
 let mediaItems = [];
+let isDraggingText = false;
+let isResizingText = false;
+let activeTextEl = null;
+let textDragStartX = 0;
+let textDragStartY = 0;
+let textStartX = 0;
+let textStartY = 0;
+let textStartFontSize = 0;
+let activeTextEffectId = null;
+let activeTextClipId = null;
 
 function initDragDrop() {
   const uploadArea = document.getElementById('uploadArea');
@@ -896,24 +1182,28 @@ function addMediaItem(media) {
   
   let mediaType = media.type;
   if (!mediaType) {
-    if (media.originalName) {
-      const ext = media.originalName.split('.').pop().toLowerCase();
-      if (['mp3', 'wav', 'aac', 'ogg', 'flac', 'm4a'].includes(ext)) mediaType = 'audio';
-      else mediaType = 'video';
-    } else {
-      mediaType = 'video';
-    }
+    const fileName = media.originalName || media.name || media.fileName || media.title || '';
+    const ext = fileName.split('.').pop().toLowerCase();
+    const audioExtensions = ['mp3', 'wav', 'aac', 'ogg', 'flac', 'm4a', 'wma', 'amr'];
+    const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv', 'wmv', 'm4v'];
+    const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
+    
+    if (audioExtensions.includes(ext)) mediaType = 'audio';
+    else if (videoExtensions.includes(ext)) mediaType = 'video';
+    else if (imageExtensions.includes(ext)) mediaType = 'image';
+    else mediaType = 'video';
   }
   item.dataset.mediaType = mediaType;
   media.type = mediaType;
   
   mediaItems.push(media);
   
-  const name = escapeHtml(media.originalName || media.name || '未命名');
+  const name = escapeHtml(media.originalName || media.name || media.title || '未命名');
   
   item.innerHTML = `
     ${media.thumbnailUrl ? `<img src="${media.thumbnailUrl}" alt="">` : 
       mediaType === 'audio' ? '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:24px;">🎵</div>' :
+      mediaType === 'image' ? '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:24px;">🖼️</div>' :
       '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:24px;">🎬</div>'}
     <div class="media-name">${name}</div>
   `;
@@ -1232,7 +1522,8 @@ async function init() {
     const response = await fetch('/api/v1/videos');
     const data = await response.json();
     if (data.data) {
-      data.data.forEach(addMediaItem);
+      const items = Array.isArray(data.data) ? data.data : data.data.items || [];
+      items.forEach(addMediaItem);
     }
   } catch (error) {
     console.error('Failed to load videos:', error);

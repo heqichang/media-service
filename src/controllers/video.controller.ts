@@ -64,8 +64,20 @@ export class VideoController {
         prisma.video.count({ where }),
       ]);
 
+      const audioExtensions = ['mp3', 'wav', 'aac', 'ogg', 'flac', 'm4a', 'wma', 'amr'];
+      const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv', 'wmv', 'm4v'];
+      const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
+
+      const itemsWithType = videos.map(video => {
+        const ext = path.extname(video.title || video.fileName || '').toLowerCase().slice(1);
+        let type = 'video';
+        if (audioExtensions.includes(ext)) type = 'audio';
+        else if (imageExtensions.includes(ext)) type = 'image';
+        return { ...video, type };
+      });
+
       successResponse(res, {
-        items: videos,
+        items: itemsWithType,
         total,
         page,
         pageSize,

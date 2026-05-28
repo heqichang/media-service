@@ -436,31 +436,120 @@ body {
 
 .preview-wrapper {
   position: relative;
-  max-width: 100%;
-  max-height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.preview-wrapper video {
-  display: block;
+  width: 100%;
   max-width: 100%;
   max-height: calc(100vh - 60px - 280px - 40px);
-  background: black;
+  display: block;
+  background: #000;
   border-radius: 8px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
 }
 
-.text-overlay {
+.preview-wrapper::before {
+  content: '';
+  display: block;
+  padding-top: var(--aspect-padding, calc(1080 / 1920 * 100%));
+}
+
+.composition-layer {
   position: absolute;
   top: 0;
   left: 0;
-  right: 0;
-  bottom: 0;
-  pointer-events: none;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
-  border-radius: 8px;
+}
+
+.composition-layer video,
+.composition-layer img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: black;
+}
+
+.composition-text {
+  position: absolute;
+  white-space: nowrap;
+  font-weight: bold;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  cursor: move;
+  padding: 4px 8px;
+  border-radius: 4px;
+  user-select: none;
+  transition: outline 0.15s;
+  box-sizing: border-box;
+}
+
+.composition-text:hover {
+  outline: 2px dashed #667eea;
+  outline-offset: 2px;
+}
+
+.composition-text.selected {
+  outline: 2px solid #f5576c;
+  outline-offset: 2px;
+}
+
+.composition-text.editing {
+  outline: 2px solid #667eea;
+  background: rgba(0, 0, 0, 0.5);
+  cursor: text;
+}
+
+.composition-text.editing input {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  outline: none;
+  text-align: center;
+  padding: 0;
+  margin: 0;
+  width: 100%;
+}
+
+.composition-text .resize-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: #f5576c;
+  border: 2px solid white;
+  border-radius: 50%;
+  display: none;
+  z-index: 10;
+}
+
+.composition-text.selected .resize-handle {
+  display: block;
+}
+
+.composition-text .resize-handle.se {
+  right: -6px;
+  bottom: -6px;
+  cursor: se-resize;
+}
+
+.clip-text {
+  background: linear-gradient(135deg, #4facfe, #00f2fe);
+}
+
+.clip-text .clip-label {
+  color: white;
+  font-weight: 500;
+}
+
+.clip-text .clip-thumbnail {
+  background: rgba(255, 255, 255, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .text-overlay .overlay-text {
@@ -470,11 +559,12 @@ body {
   text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
   transform: translate(-50%, -50%);
   pointer-events: auto;
-  cursor: pointer;
+  cursor: move;
   padding: 4px 8px;
   border-radius: 4px;
   user-select: none;
   transition: outline 0.15s;
+  box-sizing: border-box;
 }
 
 .text-overlay .overlay-text:hover {
@@ -490,6 +580,7 @@ body {
 .text-overlay .overlay-text.editing {
   outline: 2px solid #667eea;
   background: rgba(0, 0, 0, 0.5);
+  cursor: text;
 }
 
 .text-overlay .overlay-text.editing input {
@@ -503,6 +594,27 @@ body {
   padding: 0;
   margin: 0;
   width: 100%;
+}
+
+.text-overlay .overlay-text.selected .resize-handle {
+  display: block;
+}
+
+.text-overlay .resize-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: #f5576c;
+  border: 2px solid white;
+  border-radius: 50%;
+  display: none;
+  z-index: 10;
+}
+
+.text-overlay .resize-handle.se {
+  right: -6px;
+  bottom: -6px;
+  cursor: se-resize;
 }
 
 .timeline-container {

@@ -291,8 +291,17 @@ export class UploadController {
         fs.mkdirSync(uploadDir, { recursive: true });
       }
 
-      const ext = path.extname(originalName);
-      const safeName = uuidv4() + ext;
+      const ext = path.extname(originalName).toLowerCase().slice(1);
+      const audioExtensions = ['mp3', 'wav', 'aac', 'ogg', 'flac', 'm4a', 'wma', 'amr'];
+      const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv', 'wmv', 'm4v'];
+      const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
+      
+      let detectedType = 'video';
+      if (audioExtensions.includes(ext)) detectedType = 'audio';
+      else if (videoExtensions.includes(ext)) detectedType = 'video';
+      else if (imageExtensions.includes(ext)) detectedType = 'image';
+
+      const safeName = uuidv4() + '.' + ext;
       const finalPath = path.join(uploadDir, safeName);
       
       fs.renameSync(req.file.path, finalPath);
@@ -323,7 +332,7 @@ export class UploadController {
           originalName,
           thumbnailUrl: null,
           name: originalName,
-          type: 'video',
+          type: detectedType,
         },
         'File uploaded successfully'
       );
